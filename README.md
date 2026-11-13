@@ -5,7 +5,7 @@
 **Explainable forensics for edited and AI-generated images, audio and video.**
 It shows *where* a file was changed and *why* it thinks so — and says so plainly when it cannot tell.
 
-[العربية](README.ar.md) · [How each detector works](docs/METHODS.md) · [Benchmarks](#measured-results)
+[العربية](README.ar.md) · [How each detector works](docs/METHODS.md) · [Benchmarks](#measured-results) · [Publishing checklist](docs/PUBLISHING.md)
 
 </div>
 
@@ -15,11 +15,11 @@ It shows *where* a file was changed and *why* it thinks so — and says so plain
 $ basira scan splice_2.jpg
 splice_2.jpg  [image]
   Likely manipulated
-  manipulation  ████████████████░░░░  79.9%
+  manipulation  ████████████████░░░░  80.0%
   AI generation ░░░░░░░░░░░░░░░░░░░░   0.0%
   provenance    ░░░░░░░░░░░░░░░░░░░░   0.0%
-  · [JPEG double-quantisation map] The image was JPEG-compressed at least twice (19 DCT
-    frequencies show double-quantisation periodicity), and a compact region (4.3% of blocks)
+  · [JPEG double-quantisation map] The image was JPEG-compressed at least twice (8 DCT
+    frequencies show double-quantisation periodicity), and a compact region (3.5% of blocks)
     does NOT share that history — consistent with content pasted in before the last save.
   report: splice_2.jpg.basira.html
 ```
