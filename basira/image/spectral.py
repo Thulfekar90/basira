@@ -28,8 +28,8 @@ from .load import ImageData
 
 TILE = 256
 PEAK_THRESHOLD = 5.0       # dB above local background for a lattice peak to count
-SPEC_STAT_THRESHOLD = 4.0
-SPEC_STAT_SOFTNESS = 1.5
+SPEC_STAT_THRESHOLD = 3.0    # dB above the off-lattice null reference
+SPEC_STAT_SOFTNESS = 1.0
 CFA_RATIO_THRESHOLD = 1.06   # mean|e| ratio between the two green lattices
 
 
@@ -117,7 +117,18 @@ def analyze_spectral(d: ImageData) -> Evidence:
         jpeg_strength = 0.0
         candidates = {k: v for k, v in peaks8.items() if abs(k[0]) != 4 and abs(k[1]) != 4}
     strong = {k: v for k, v in candidates.items() if v > PEAK_THRESHOLD}
-    stat = float(np.mean(sorted(candidates.values(), reverse=True)[:6])) if candidates else 0.0
+    # Null reference: the same 3x3-max statistic at random off-lattice frequencies. The
+    # expected top-6 mean of that many null draws is about mean + 1.6 sd; only the part of
+    # the lattice response above it counts (otherwise plain noise images look "periodic").
+    n_spec = excess.shape[0]
+    rs = np.random.RandomState(0)
+    ry, rx = rs.randint(2, n_spec - 2, 3000), rs.randint(2, n_spec - 2, 3000)
+    off = (ry % (n_spec // 8) > 3) & (rx % (n_spec // 8) > 3) & \
+        (np.hypot(ry - n_spec // 2, rx - n_spec // 2) > 8)
+    null = np.array([excess[y - 1:y + 2, x - 1:x + 2].max() for y, x in zip(ry[off], rx[off])])
+    null_ref = float(null.mean() + 1.6 * null.std()) if null.size > 50 else 0.0
+    stat = float(np.mean(sorted(candidates.values(), reverse=True)[:6]) - null_ref) \
+        if candidates else 0.0
     # Off-lattice periodic spikes (any strong isolated peak), e.g. other upsampling factors.
     ex = excess.copy()
     c = ex.shape[0] // 2
@@ -127,27 +138,25 @@ def analyze_spectral(d: ImageData) -> Evidence:
     ratio, texture, cfa_glob = cfa_map(d.rgb)
     camera_like = cfa_glob > CFA_RATIO_THRESHOLD
     score = calibrate(stat, SPEC_STAT_THRESHOLD, SPEC_STAT_SOFTNESS)
-    if camera_like:
-        score *= 0.6
-    if d.is_jpeg:
-        conf = 0.1
-    elif d.lossless:
-        conf = 0.5
+    if d.is_jpeg or not d.lossless:
+        conf = 0.1          # block-based lossy codecs occupy the same lattice
+    elif d.palette:
+        conf = 0.15         # palette quantisation / dithering is periodic too
     else:
-        conf = 0.3
+        conf = 0.5
     spec_vis = np.clip((spec - np.percentile(spec, 1)) / (np.ptp(spec) + 1e-6) * 255, 0, 255)
     spec_vis = cv2.applyColorMap(spec_vis.astype(np.uint8), cv2.COLORMAP_INFERNO)[..., ::-1]
     return Evidence(
         detector=det, title=title, category=Category.AI_GENERATION, score=score, confidence=conf,
         summary=(f"The noise residual has {len(strong)} sharp periodic peaks on the 1/8 "
-                 f"frequency lattice (mean excess {stat:.1f} dB) — the signature of a "
+                 f"frequency lattice ({stat:.1f} dB above the off-lattice background) — the signature of a "
                  f"generator's upsampling layers." if score >= 0.5 else
                  ("JPEG blocking occupies the same frequency lattice, so generator "
                   "periodicity cannot be measured reliably on this file."
                   if d.is_jpeg else
                   f"No generator-like periodic peaks in the residual spectrum (mean lattice "
                   f"excess {stat:.1f} dB < {SPEC_STAT_THRESHOLD} dB).")) +
-                (" Camera demosaicing traces are present." if camera_like else ""),
+                (" Camera demosaicing traces are present." if camera_like and score < 0.5 else ""),
         details={"lattice_excess_db": stat, "strong_peaks": len(strong),
                  "threshold_db": SPEC_STAT_THRESHOLD, "offlattice_p99.97_db": off_peak,
                  "jpeg_lattice_db": jpeg_strength, "cfa_ratio": cfa_glob,

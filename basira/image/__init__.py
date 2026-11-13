@@ -43,6 +43,8 @@ def analyze_image(path: str, *, skip: Optional[List[str]] = None, **_) -> Report
     info = {"format": d.format, "width": w, "height": h, "jpeg_quality": d.jpeg_quality,
             "jpeg_standard_table": d.quant_is_standard, "subsampling": d.subsampling,
             "has_alpha": d.has_alpha, "bytes": len(d.raw)}
+    if d.notes:
+        info["notes"] = "; ".join(d.notes)
     report = Report(path=path, media_type="image", info=info)
     try:
         report.evidences.extend(analyze_metadata(d))

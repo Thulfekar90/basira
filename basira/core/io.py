@@ -57,7 +57,7 @@ def sniff(path: str) -> str:
         return "video"
     if len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0:
         return "audio"  # raw MPEG audio frame sync
-    raise ValueError(f"Unrecognised media type: {path}")
+    raise ValueError(f"Unrecognised media type: {os.path.basename(path)}")
 
 
 def ffmpeg_exe() -> Optional[str]:

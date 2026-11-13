@@ -44,6 +44,7 @@ class ImageData:
     quant_is_standard: Optional[bool] = None
     subsampling: Optional[str] = None
     has_alpha: bool = False
+    palette: bool = False
     notes: List[str] = field(default_factory=list)
 
     @property
@@ -82,6 +83,7 @@ def load_image(path: str, max_pixels: int = 60_000_000) -> ImageData:
     with open(path, "rb") as f:
         raw = f.read()
     Image.MAX_IMAGE_PIXELS = max_pixels
+    notes: List[str] = []
     im = Image.open(io.BytesIO(raw))
     fmt = im.format or "UNKNOWN"
     info = dict(im.info)
@@ -115,12 +117,28 @@ def load_image(path: str, max_pixels: int = 60_000_000) -> ImageData:
             pass
 
     has_alpha = im.mode in ("RGBA", "LA", "PA") or "transparency" in info
-    frame = im.convert("RGB")
+    palette = im.mode in ("P", "PA")
+    try:
+        frame = im.convert("RGB")
+    except OSError:
+        # A truncated file is still evidence: decode what is there and say so.
+        from PIL import ImageFile
+
+        old_flag = ImageFile.LOAD_TRUNCATED_IMAGES
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
+        try:
+            im = Image.open(io.BytesIO(raw))
+            frame = im.convert("RGB")
+            notes.append("file is truncated; the missing part was decoded as blank")
+        finally:
+            ImageFile.LOAD_TRUNCATED_IMAGES = old_flag
     rgb = np.asarray(frame, dtype=np.uint8).copy()
 
     luma = None
     if fmt == "JPEG":
         try:
+            if notes:
+                raise OSError("truncated")
             imy = Image.open(io.BytesIO(raw))
             imy.draft("YCbCr", imy.size)  # decoder output without colour conversion
             if imy.mode == "YCbCr":
@@ -135,7 +153,7 @@ def load_image(path: str, max_pixels: int = 60_000_000) -> ImageData:
     return ImageData(path=path, raw=raw, format=fmt, rgb=rgb, pil_info=info, exif=exif,
                      exif_sub=exif_sub, quant=quant, quant_chroma=quant_c, luma_y=luma,
                      jpeg_quality=q_est, quant_is_standard=q_std, subsampling=subsampling,
-                     has_alpha=has_alpha)
+                     has_alpha=has_alpha, palette=palette, notes=notes)
 
 
 def from_array(rgb: np.ndarray, name: str = "<frame>") -> ImageData:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import io
 import re
+import warnings
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
@@ -29,8 +30,13 @@ def calibrate(x: float, threshold: float, softness: float) -> float:
 
 def robust_z(values: np.ndarray, axis=None) -> np.ndarray:
     """Median / MAD z-score (robust to the anomaly we are looking for)."""
-    med = np.nanmedian(values, axis=axis, keepdims=axis is not None)
-    mad = np.nanmedian(np.abs(values - med), axis=axis, keepdims=axis is not None)
+    values = np.asarray(values, dtype=np.float64)
+    if not np.isfinite(values).any():
+        return np.zeros_like(values)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        med = np.nanmedian(values, axis=axis, keepdims=axis is not None)
+        mad = np.nanmedian(np.abs(values - med), axis=axis, keepdims=axis is not None)
     return (values - med) / (1.4826 * mad + 1e-9)
 
 

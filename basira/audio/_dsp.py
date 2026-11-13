@@ -18,7 +18,7 @@ def to_mono(samples: np.ndarray) -> np.ndarray:
     """(n,) or (n, ch) -> float32 (n,), NaN/inf replaced by 0."""
     a = np.asarray(samples, dtype=np.float32)
     if a.ndim == 2:
-        if a.shape[0] < a.shape[1] and a.shape[0] <= 8:  # (ch, n) given by mistake
+        if 0 < a.shape[0] < a.shape[1] and a.shape[0] <= 8:  # (ch, n) given by mistake
             a = a.T
         a = a[:, 0] if a.shape[1] == 1 else a.mean(axis=1, dtype=np.float32)
     a = np.nan_to_num(a.reshape(-1), nan=0.0, posinf=0.0, neginf=0.0)
