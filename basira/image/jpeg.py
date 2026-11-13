@@ -20,6 +20,10 @@ from .common import cohesive_anomaly, heat_from_z, regions_from_mask
 from .load import ZIGZAG, ImageData
 
 N_FREQ = 20              # first AC coefficients in zig-zag order
+# Valley / peak mass of the comb. Direct double saves measure <= 0.02 (<= 0.26 when a
+# splice fills the valleys); images processed between saves (CoMoFoD re-compressed
+# originals) measure 0.21-0.54 and produced false alarms before this check existed.
+COMB_MAX_VALLEY = 0.20
 HIST_RANGE = 48
 NOISE_FLOOR = 4.0        # |coefficient| below this is pixel-rounding noise between saves
 PERIOD_MIN_STRENGTH = 3.0    # between-phase / within-phase variance of the folded histogram
@@ -58,13 +62,16 @@ def _period(h: np.ndarray, center: int) -> Tuple[int, float]:
     Returns (period, strength); period 1 means "no comb".
     """
     hf = h.astype(np.float64)
-    idx = np.arange(len(h)) - center
-    best_p, best_r = 1, 0.0
+    n = len(h)
+    idx = np.arange(n) - center
+    pos = np.arange(n)
+    ratios: Dict[int, float] = {}
     for p in range(2, 11):
         kern = np.ones(p + 1)
         kern[0] = kern[-1] = 0.5              # centred window spanning one full period
         trend = np.convolve(hf, kern / p, mode="same")
-        ok = (trend >= 8) & (np.abs(idx) >= 2)
+        # Bins within p of either end see a zero-padded average: leave them out.
+        ok = (trend >= 8) & (np.abs(idx) >= 2) & (pos >= p) & (pos < n - p)
         if ok.sum() < 4 * p:
             continue
         hn = hf / np.maximum(trend, 1e-9) - 1.0
@@ -77,10 +84,54 @@ def _period(h: np.ndarray, center: int) -> Tuple[int, float]:
             within.append(sel.var())
         else:
             means = np.asarray(means)
-            ratio = float(means.var() / (np.mean(within) + 1e-4))
-            if np.ptp(means) >= 0.3 and ratio > best_r * 1.25:   # prefer the fundamental
-                best_p, best_r = p, ratio
+            if np.ptp(means) >= 0.3:
+                ratios[p] = float(means.var() / (np.mean(within) + 1e-4))
+    if not ratios:
+        return 1, 0.0
+    best_p = max(ratios, key=lambda k: ratios[k])
+    best_r = ratios[best_p]
+    # A comb of period d also folds perfectly at 2d, 3d...: resolve to the fundamental.
+    for d in sorted(ratios):
+        if d < best_p and best_p % d == 0 and ratios[d] >= 0.5 * best_r:
+            best_p, best_r = d, ratios[d]
+            break
     return (best_p, best_r) if best_r >= PERIOD_MIN_STRENGTH else (1, best_r)
+
+
+def _llr_tables(h: np.ndarray, p: int, q: float, center: int):
+    """Per-bin log-likelihood ratio "single vs double compressed" and its expectation
+    under both hypotheses.
+
+    The histogram is cut into windows of one period, centred on multiples of p. Inside
+    a window, an untouched (doubly compressed) coefficient follows the measured comb
+    P_u; a tampered one is uniform, P_t. Both are normalised over exactly the bins that
+    are scored: bins below the pixel-rounding noise floor, the window around zero and
+    windows cut off by the histogram range are dropped, and a window needs at least two
+    scored bins to discriminate anything. Returns (llr, E_u[llr], E_t[llr], live).
+    """
+    n = len(h)
+    idx = np.arange(n) - center
+    widx = np.floor_divide(idx + p // 2, p)
+    eligible = np.abs(idx) * q >= NOISE_FLOOR
+    llr, eu, et = np.zeros(n), np.zeros(n), np.zeros(n)
+    live = np.zeros(n, bool)
+    for w in np.unique(widx):
+        if w == 0:
+            continue
+        bins = np.flatnonzero(widx == w)
+        if len(bins) != p:
+            continue                           # incomplete window at the histogram edge
+        keep = bins[eligible[bins]]
+        if len(keep) < 2 or h[keep].sum() < 20:
+            continue
+        pu = (h[keep] + 0.5) / (h[keep].sum() + 0.5 * len(keep))
+        pt = 1.0 / len(keep)
+        lw = np.clip(np.log(pt / pu), -3, 3)
+        llr[keep] = lw
+        eu[keep] = float((pu * lw).sum())
+        et[keep] = float((pt * lw).sum())
+        live[keep] = True
+    return llr, eu, et, live
 
 
 def analyze_double_quantization(d: ImageData) -> Evidence:
@@ -100,6 +151,7 @@ def analyze_double_quantization(d: ImageData) -> Evidence:
     ET = np.zeros((hb, wb))
     N = np.zeros((hb, wb))
     periodic: List[Dict] = []
+    smeared = 0
     for zz in range(1, N_FREQ + 1):
         u, v = divmod(int(ZIGZAG[zz]), 8)
         q = Q[u, v]
@@ -109,37 +161,34 @@ def analyze_double_quantization(d: ImageData) -> Evidence:
         p, strength = _period(h, HIST_RANGE)
         if p < 2:
             continue
+        # Comb purity. After a direct second save the valleys of the comb are (almost)
+        # empty. If the image was processed between the saves - colour adjustment,
+        # filtering, partial re-alignment - the valleys fill up everywhere, the
+        # single-vs-double model no longer describes untouched content, and local
+        # differences in that smearing would be mistaken for edits. Skip such combs.
+        idx0 = np.arange(len(h)) - HIST_RANGE
+        sel = (np.abs(idx0) >= 2) & (np.abs(idx0) <= 20)
+        mass = np.array([h[sel & ((idx0 % p) == a)].sum() for a in range(p)], dtype=np.float64)
+        if mass.min() / max(mass.max(), 1.0) > COMB_MAX_VALLEY:
+            smeared += 1
+            continue
         periodic.append({"freq": [u, v], "q2": float(q), "period": p, "strength": round(strength, 3)})
-        # P_u(k) = h(k) / sum(h over its period window); P_t = 1/p. Windows are centred
-        # on multiples of the period. The window around zero is skipped: tiny non-zero
-        # coefficients there come from pixel rounding between the two saves, not from
-        # a different compression history, and would light up every smooth area.
-        idx = np.arange(len(h)) - HIST_RANGE
-        widx = np.floor_divide(idx + p // 2, p)
-        start = widx * p - p // 2 + HIST_RANGE
-        csum = np.concatenate([[0], np.cumsum(h)])
-        win = csum[np.clip(start + p, 0, len(h))] - csum[np.clip(start, 0, len(h))]
-        pu = (h + 0.5) / (win + 0.5 * p)
-        llr_tab = np.clip(np.log((1.0 / p) / pu), -3, 3)
-        dead = (widx == 0) | (win < 20)
-        llr_tab[dead] = 0.0
-        # Expected LLR of a coefficient in each period window under both hypotheses:
-        # "untouched" (follows the double-compression histogram) and "tampered"
-        # (uniform inside the window). Normalising by these removes the dependence on
-        # *which* windows a block's coefficients fall in, i.e. on local texture.
-        wkey = (widx - widx.min()).astype(np.int64)
-        eu_w = np.bincount(wkey, weights=pu * llr_tab)
-        et_w = np.bincount(wkey, weights=llr_tab / p)
-        eu_tab, et_tab = eu_w[wkey], et_w[wkey]
-        eu_tab[dead], et_tab[dead] = 0.0, 0.0
+        llr_tab, eu_tab, et_tab, live = _llr_tables(h, p, float(q), HIST_RANGE)
         ki = np.clip(k + HIST_RANGE, 0, len(h) - 1)
-        informative = use & ~dead[ki] & (np.abs(k) * q >= NOISE_FLOOR)
+        informative = use & live[ki]
         L += np.where(informative, llr_tab[ki], 0.0)
         EU += np.where(informative, eu_tab[ki], 0.0)
         ET += np.where(informative, et_tab[ki], 0.0)
         N += informative
-    info = {"periodic_frequencies": len(periodic), "periods": periodic[:10],
-            "last_quality": d.jpeg_quality}
+    info = {"periodic_frequencies": len(periodic), "smeared_combs": smeared,
+            "periods": periodic[:10], "last_quality": d.jpeg_quality}
+    if len(periodic) < MIN_PERIODIC_FREQS and smeared >= MIN_PERIODIC_FREQS:
+        return Evidence(
+            detector=det, title=title, category=Category.MANIPULATION, score=0.0, confidence=0.1,
+            summary=f"The image was compressed more than once ({smeared} DCT frequencies show "
+                    f"a comb), but the combs are smeared: it was processed between the saves "
+                    f"(colour or tone adjustment, filtering). Edits cannot be localised from "
+                    f"compression history in that case.", details=info)
     if len(periodic) < MIN_PERIODIC_FREQS:
         return Evidence(
             detector=det, title=title, category=Category.MANIPULATION, score=0.0, confidence=0.1,

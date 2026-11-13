@@ -144,7 +144,7 @@ Each detector returns `score` (0.5 = its threshold) and `confidence` (how applic
 ```bash
 git clone https://github.com/OWNER/basira.git && cd basira
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest                      # 68 tests, ~95 s
+.venv/bin/python -m pytest                      # 75 tests, ~2 min
 .venv/bin/python benchmarks/synthetic_images.py # synthetic image numbers
 .venv/bin/python benchmarks/real_content.py --sources ~/Pictures/some_folder --robust
 .venv/bin/python examples/make_demo.py          # demo forgeries, figures and HTML reports

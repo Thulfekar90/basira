@@ -1,12 +1,14 @@
-"""Local sensor-noise inconsistency (splicing / AI in-painting localisation).
+"""Abnormally smooth regions (AI in-painting / generative fill / heavy retouching).
 
 Every capture pipeline leaves a characteristic noise level that depends on the
-sensor, ISO and processing — and on pixel intensity. A pasted object or an
-AI-in-painted area ("generative fill") usually carries a different (often much
-smoother) noise level. We estimate noise per block with Immerkaer's fast
-Laplacian-difference estimator on non-edge pixels, remove the expected
-intensity dependence with a robust fit, and look for a compact cluster of
-blocks whose residual noise is abnormal in either direction.
+sensor, ISO and processing, and on pixel intensity and local texture. An
+AI-in-painted or heavily retouched area usually carries much less noise than its
+surroundings. We estimate noise per block with Immerkaer's fast
+Laplacian-difference estimator on non-edge pixels, remove the expected dependence
+on brightness and texture with a robust fit, and look for a compact cluster of
+blocks that are abnormally smooth. (The opposite direction, "noisier than
+expected", is not used: it is dominated by fine texture and produced false alarms
+on camera originals.)
 """
 from __future__ import annotations
 
@@ -77,19 +79,20 @@ def analyze_noise(d: ImageData) -> Evidence:
     z = robust_z(resid)
     z = np.where(valid, z, 0.0)
 
-    st_hi, comp_hi, info_hi = cohesive_anomaly(z, thr=Z_THR)
-    st_lo, comp_lo, info_lo = cohesive_anomaly(-z, thr=Z_THR)
-    if st_lo >= st_hi:
-        stat, comp, info, kind = st_lo, comp_lo, info_lo, "smoother"
-        heat_z = -z
-    else:
-        stat, comp, info, kind = st_hi, comp_hi, info_hi, "noisier"
-        heat_z = z
+    # Only *abnormally smooth* regions count. Regions that look noisier than expected are
+    # usually fine texture (fabric, foliage, print) that no brightness/texture model fully
+    # predicts: on the Columbia camera originals that direction fired on 11 of 183
+    # authentic images and separated nothing (AUC 0.55), so it is not used as evidence.
+    stat, comp, info = cohesive_anomaly(-z, thr=Z_THR)
+    kind, heat_z = "smoother", -z
     score = calibrate(stat, STAT_THRESHOLD, STAT_SOFTNESS)
-    # Heavy JPEG compression flattens noise everywhere -> less reliable.
-    conf = 0.65
+    # Deliberately a weak vote. Smooth regions also occur naturally (defocus, sky, studio
+    # backdrops): on public datasets this detector fired on 7 of 200 CoMoFoD originals and
+    # 1 of 183 Columbia originals. At this confidence only a very strong anomaly can flag
+    # an image on its own; otherwise it contributes a lead and a map.
+    conf = 0.5
     if d.is_jpeg and d.jpeg_quality and d.jpeg_quality < 80:
-        conf = 0.45
+        conf = 0.4
     H, W = d.rgb.shape[:2]
     heat = heat_from_z(heat_z, (H, W), lo=2.0, hi=6.0)
     med_sigma = float(np.nanmedian(sigma))

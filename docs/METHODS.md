@@ -12,27 +12,32 @@ For each category (manipulation, AI generation, provenance):
     excess_i = clip((score_i - 0.5) / 0.5, 0, 1) * confidence_i
     category = 1 - prod(1 - excess_i)
 
-Evidence marked *decisive* (a generator's own metadata) sets the category directly.
-Verdict levels: 0 "No significant traces found" (< 0.20), 1 "Inconclusive" (< 0.45),
-2 "Suspicious" (< 0.75), 3 "Likely manipulated / AI-generated", 4 provenance proof.
-The fused localisation map averages the maps of detectors that fired, weighted by excess.
+Evidence marked *decisive* (a generator's own, structurally validated metadata) sets the
+category directly. The verdict follows the stronger of the manipulation and AI-generation
+categories; weak hints from different categories never add up to a verdict. Levels:
+0 "No significant traces found" (< 0.20), 1 "Inconclusive" (< 0.45), 2 "Suspicious"
+(< 0.75), 3 "Likely manipulated / AI-generated", 4 provenance proof. If a detector
+crashed or the content could not be decoded, the result is never level 0. The fused
+localisation map averages the maps of detectors that fired, weighted by excess.
 
 ## Image
 
 | id | Method | Precondition | Reference |
 |---|---|---|---|
-| `image.jpeg_dq` | Histograms of quantised DCT coefficients show a comb after a second JPEG save. The comb is detected per frequency by folding the histogram (divided by its one-period moving average) and requiring between-phase variance ≥ 3× within-phase variance with ≥ 30% modulation; single-compressed files give zero combs. Each coefficient then contributes a log-likelihood ratio "single vs double", normalised by its expectation under both hypotheses so the block score (0 = double like the majority, 1 = single) does not depend on local texture. Coefficients below the pixel-rounding noise floor and the window around zero are ignored. A compact cluster of blocks scoring > 0.5 is flagged. | JPEG saved ≥ 2 times, grid aligned | Lin, He, Tang & Tang, *Pattern Recognition* 2009 |
-| `image.noise` | Immerkær noise estimate per block on non-edge pixels; expected value regressed robustly on brightness and local texture; compact cluster of residual outliers (either direction). | region ≥ a few blocks; weaker below JPEG Q80 | Immerkær, *CVIU* 1996; Mahdian & Saic 2009 |
-| `image.copymove` | SIFT self-matching with the generalised 2NN test, iterative RANSAC affine grouping, then dense verification by local normalised correlation between the image and its warped self. | textured content | Amerini et al., *IEEE TIFS* 2011 |
-| `image.cfa` | 2-periodic prediction error of the green channel left by demosaicing; local absence inside a demosaiced image. | uncompressed or very high quality, not resized | Popescu & Farid 2005; Ferrara et al. 2012 |
-| `image.spectral` | Sharp peaks on the 1/8 frequency lattice of the noise-residual power spectrum (upsampling layers of generators). | lossless, not resized; disabled for JPEG | Zhang, Karaman & Chang 2019; Corvi et al. 2023 |
+| `image.jpeg_dq` | Histograms of quantised DCT coefficients show a comb after a second JPEG save. The comb is detected per frequency by folding the histogram (divided by its one-period moving average) and requiring between-phase variance ≥ 3× within-phase variance with ≥ 30% modulation; single-compressed files give zero combs. Combs whose valleys are filled (valley/peak mass > 0.20) are rejected: they mean the image was processed between the saves, and the model below no longer holds. Each coefficient then contributes a log-likelihood ratio "single vs double", normalised by its expectation under both hypotheses over exactly the scored bins, so the block score (0 = double like the majority, 1 = single) does not depend on local texture. Coefficients below the pixel-rounding noise floor and the window around zero are ignored. A compact cluster of blocks scoring > 0.5 is flagged. | JPEG saved ≥ 2 times directly, grid aligned | Lin, He, Tang & Tang, *Pattern Recognition* 2009 |
+| `image.copymove` | SIFT self-matching with the generalised 2NN test and iterative RANSAC affine grouping. A match is accepted as a clone only if the *fine detail* of the two areas also matches: correlation of the denoising residual over small discs around the matched keypoints ≥ 0.62 (≥ 0.52 with 50+ matches). Look-alike real objects (keys, windows, books of one series) match as keypoints but fail this test. The region mask comes from dense local correlation between the image and its warped self. | textured content | Amerini et al., *IEEE TIFS* 2011 |
+| `image.cfa` | Demosaicing leaves a 2-periodic prediction error on the green channel; in a single-camera image the same lattice is the acquired one everywhere. A compact cluster of blocks with the *opposite* lattice (log error ratio < −0.15) was demosaiced on a different pixel grid, i.e. comes from another image. Regions pasted with the same Bayer phase are invisible, which bounds recall near one half. | uncompressed or very high quality, not resized | Popescu & Farid 2005; Ferrara et al. 2012 |
+| `image.noise` | Immerkær noise estimate per block on non-edge pixels; expected value regressed robustly on brightness and local texture; compact cluster of *abnormally smooth* blocks (in-painting, heavy retouching). A weak vote: smooth regions also occur naturally. The "noisier than expected" direction is not used. | region ≥ a few blocks | Immerkær, *CVIU* 1996; Mahdian & Saic 2009 |
+| `image.spectral` | Sharp peaks on the 1/8 frequency lattice of the noise-residual power spectrum, measured in dB above an off-lattice null reference. Camera originals reach 7.6 dB on their own (demosaicing, sharpening), so the threshold is 10 dB. Not validated on real generator output. | lossless, not resized; disabled for lossy files | Zhang, Karaman & Chang 2019; Corvi et al. 2023 |
 | `image.ela` | Re-save error regressed on texture; kept mainly as a familiar visual, low weight. | JPEG | Krawetz 2007 |
 | `image.thumbnail` | Embedded EXIF thumbnail compared with the image (99th percentile of the smoothed difference). | thumbnail present | – |
-| `image.generator_metadata` | PNG text chunks of SD WebUI / ComfyUI / InvokeAI / NovelAI, IPTC digital source type, C2PA AI assertions, generator names in XMP. | metadata not stripped | IPTC, C2PA specs |
+| `image.generator_metadata` | PNG text chunks of SD WebUI / ComfyUI / InvokeAI / NovelAI validated structurally (a chunk merely *named* `parameters` is not proof), IPTC digital source type, C2PA AI assertions. Generator names in free text are hints only. | metadata not stripped | IPTC, C2PA specs |
 | `image.provenance` | Editing software, XMP edit history, C2PA presence, modify ≠ capture date, camera EXIF with a libjpeg table. | – | – |
 
-A block-artifact-grid detector was implemented and removed: it missed its designed case
-and fired on clean photos; the double-quantisation map covers off-grid pastes.
+Removed or cut back after measurement: a block-artifact-grid detector (missed its designed
+case, fired on clean photos); the "noisier than expected" half of the noise detector (fired
+on 11 of 183 Columbia originals, AUC 0.55); a "CFA trace missing" test (6 false alarms on
+Columbia; replaced by the phase-inversion test above).
 
 ## Audio
 

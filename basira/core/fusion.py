@@ -100,11 +100,14 @@ def finalize(report: Report, spatial_shape=None) -> Report:
         kind = "AI-generated" if any(e.category == Category.AI_GENERATION for e in decisive) \
             else "Edited"
         verdict = LEVELS[4].format(What=kind)
-    elif max(top, overall) >= 0.75:
+    # The verdict follows the stronger single category. Weak hints from different
+    # categories (say, a mild pixel anomaly plus "512x512 PNG without EXIF") must not add
+    # up to an accusation; ``overall`` is reported but does not drive the level.
+    elif top >= 0.75:
         level, verdict = 3, LEVELS[3].format(what=what)
-    elif max(top, overall) >= 0.45:
+    elif top >= 0.45:
         level, verdict = 2, LEVELS[2]
-    elif max(top, overall) >= 0.2 or prov >= 0.5:
+    elif top >= 0.2 or prov >= 0.5:
         level, verdict = 1, LEVELS[1]
     else:
         level, verdict = 0, LEVELS[0]
@@ -130,18 +133,28 @@ def finalize(report: Report, spatial_shape=None) -> Report:
         child_segments.extend(Segment(s.start, s.end, s.score, f"{tag}: {s.label}")
                               for s in c.fused_segments)
 
-    # A detector crash or an undecodable file is not a clean bill of health.
+    # A detector crash or an undecodable file is not a clean bill of health. Only a
+    # content detector that actually ran counts; a child report (sound track) cannot
+    # vouch for its parent's pixels, and a failed child counts as a failure here.
+    def ran_ok(e: Evidence) -> bool:
+        return e.error is None and e.confidence > 0 and e.category == Category.MANIPULATION
+
     failed = [e for e in evs if e.error]
-    content_ok = any(e.error is None and e.confidence > 0 and
-                     e.category in (Category.MANIPULATION,) for e in evs) or \
-        any(c.evidences for c in report.children)
+    child_failed = [c for c in report.children if c.info.get("detectors_failed") and
+                    not any(ran_ok(e) for e in c.evidences)]
+    content_ok = any(ran_ok(e) for e in evs)
     report.info["detectors_failed"] = len(failed)
-    if failed and not content_ok and report.verdict_level == 0:
+    if report.verdict_level == 0 and (failed or child_failed):
         report.verdict_level = 1
-        report.verdict = "Inconclusive (content could not be analysed)"
-        report.explanation = [f"[{e.title}] {e.summary}" for e in failed[:4]] + [
-            "No content detector could run on this file, so the absence of findings means "
-            "nothing."]
+        if not content_ok:
+            report.verdict = "Inconclusive (content could not be analysed)"
+            tail = ("No content detector could run on this file, so the absence of "
+                    "findings means nothing.")
+        else:
+            report.verdict = "Inconclusive (part of the analysis failed)"
+            tail = "The remaining detectors found nothing, but the analysis is incomplete."
+        report.explanation = [f"[{e.title}] {e.summary}" for e in failed[:4]] + \
+            [f"[{c.media_type} track] could not be analysed" for c in child_failed] + [tail]
 
     if spatial_shape is not None:
         report.fused_heatmap = fuse_heatmap(

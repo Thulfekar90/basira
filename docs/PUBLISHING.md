@@ -9,7 +9,7 @@ The repository is ready to push but has never been published. Whoever publishes 
 > account. Do not change any code or documentation other than what this brief lists.
 >
 > 1. Run `python -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/python -m pytest -q`.
->    All 68 tests must pass. If any fail, stop and report; do not publish.
+>    All 75 tests must pass. If any fail, stop and report; do not publish.
 > 2. Ask the owner for their GitHub username and whether the repository should be public.
 >    Check that the name `basira` is free on their account. If it is taken, ask for another
 >    name; do not pick one yourself.

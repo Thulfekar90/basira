@@ -30,7 +30,17 @@ _REFERENCE_MAGIC = (b"#EXTM3U", b"ffconcat", b"[playlist]", b"v=0", b"<?xml", b"
                     b"<asx", b"#!", b"file ", b"[Reference]", b"RTSPtext")
 # Decoders may only read local files.
 _FF_SAFE = ["-protocol_whitelist", "file,pipe"]
-os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "protocol_whitelist;file,pipe")
+
+
+def _enforce_opencv_whitelist() -> None:
+    """Force the local-files-only protocol whitelist into OpenCV's FFmpeg options, keeping
+    any other option the user already set (format: ``key;value|key;value``)."""
+    cur = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", "")
+    kept = [o for o in cur.split("|") if o and not o.lower().startswith("protocol_whitelist")]
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "|".join(kept + ["protocol_whitelist;file,pipe"])
+
+
+_enforce_opencv_whitelist()
 
 
 def sniff(path: str) -> str:

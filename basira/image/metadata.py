@@ -63,8 +63,36 @@ def _xmp_text(d: ImageData) -> str:
     return m.group(0).decode("utf-8", "ignore") if m else ""
 
 
-def _generator_from_text(info: Dict[str, Any]) -> List[Dict[str, str]]:
-    hits = []
+def _valid_generator_payload(key: str, txt: str) -> bool:
+    """Is this text chunk really what the generator writes, not just a chunk with the
+    same name? ("parameters" = "ordinary camera parameters" must not count.)"""
+    t = txt.strip()
+    if key == "parameters":            # AUTOMATIC1111 / Forge infotext
+        return bool(re.search(r"Steps: \d+", t) and
+                    re.search(r"(Sampler|CFG scale|Seed|Model hash|Size): ", t))
+    if key == "Dream":                 # legacy InvokeAI command line
+        return bool(re.search(r"\s-[sSCWHA] ?\d", t))
+    if key == "fooocus_scheme":
+        return t.lower() in ("fooocus", "a1111", "civitai")
+    try:
+        js = json.loads(t)
+    except Exception:
+        return False
+    if key == "prompt":                # ComfyUI API graph: {"3": {"class_type": ..., "inputs": ...}}
+        return isinstance(js, dict) and len(js) > 0 and all(
+            isinstance(v, dict) and "class_type" in v for v in js.values())
+    if key == "workflow":              # ComfyUI editor graph
+        return isinstance(js, dict) and isinstance(js.get("nodes"), list)
+    if key in ("invokeai_metadata", "sd-metadata"):
+        return isinstance(js, dict) and bool(
+            {"model", "generation_mode", "positive_prompt", "image", "app_id", "seed"} & set(js))
+    if key == "generation_data":
+        return isinstance(js, dict) and bool({"prompt", "models", "seed", "steps"} & set(js))
+    return False
+
+
+def _generator_from_text(info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    hits: List[Dict[str, Any]] = []
     for key, label in GEN_TEXT_KEYS.items():
         v = info.get(key)
         if not v:
@@ -72,15 +100,10 @@ def _generator_from_text(info: Dict[str, Any]) -> List[Dict[str, str]]:
         txt = v.decode("utf-8", "ignore") if isinstance(v, bytes) else str(v)
         if len(txt.strip()) < 8:
             continue
-        snippet = txt.strip().replace("\n", " ")[:220]
-        if key in ("prompt", "workflow"):
-            try:
-                js = json.loads(txt)
-                if not isinstance(js, (dict, list)):
-                    continue
-            except Exception:
-                continue
-        hits.append({"label": label, "key": key, "snippet": snippet, "strong": True})
+        valid = _valid_generator_payload(key, txt)
+        hits.append({"label": label if valid else f"'{key}' text chunk (unrecognised content)",
+                     "key": key, "snippet": txt.strip().replace("\n", " ")[:220],
+                     "strong": valid})
     # A generator named in the Software field is the writer identifying itself. The same
     # name in a title or description is ordinary prose ("Firefly at night"): a hint only.
     for key in ("Software", "Comment", "Description", "Source", "Title"):

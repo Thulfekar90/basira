@@ -23,9 +23,19 @@ MAX_SIDE = 1600
 MIN_SHIFT = 24          # px: ignore matches closer than this (self-similarity)
 G2NN_RATIO = 0.5
 MIN_INLIERS = 8
-INLIER_THRESHOLD = 12   # inliers at which the score reaches 0.5
-INLIER_SOFTNESS = 4
+INLIER_THRESHOLD = 10   # inliers at which the score reaches 0.5
+INLIER_SOFTNESS = 1.5
 CORR_THR = 0.92
+# Correlation of the denoising residual between the two matched areas. Selected on 348
+# real clones (CoMoFoD, plus this project's clones on real photos, fresh and re-compressed)
+# against 92 look-alike matches in untouched images (Columbia, CoMoFoD originals): this rule
+# keeps 231 clones and 3 look-alikes. Those thresholds were tuned on that same data.
+FINE_THRESHOLD = 0.62
+FINE_THRESHOLD_MANY = 0.52
+MANY_INLIERS = 50
+FINE_SOFTNESS = 0.02
+IDENTITY_RADIUS = 10
+MIN_VERIFIED_AREA = 0.0005
 
 
 def _local_corr(a: np.ndarray, b: np.ndarray, valid: np.ndarray, k: int = 9) -> np.ndarray:
@@ -115,6 +125,7 @@ def analyze_copymove(d: ImageData) -> Evidence:
     mask_dst = np.zeros((h, w), np.uint8)
     best_in = 0
     descs = []
+    identities = []
     g = gray.astype(np.float32)
     for M, s_in, d_in in transforms:
         best_in = max(best_in, len(s_in))
@@ -129,9 +140,24 @@ def analyze_copymove(d: ImageData) -> Evidence:
         cv2.fillConvexPoly(near, hull_d, 1)
         near = cv2.dilate(near, np.ones((41, 41), np.uint8))
         tgt &= near
-        if tgt.sum() < 0.0005 * h * w:   # fall back to the keypoint hull
-            tgt = np.zeros_like(tgt)
-            cv2.fillConvexPoly(tgt, hull_d, 1)
+        # Is the match a *digital copy*, or two real objects that look alike (keyboard
+        # keys, identical windows, books of one series)? Keypoints match in both cases.
+        # What only a copy shares is the fine detail: sensor noise and micro-texture. So
+        # compare the denoising residual of the two areas, over small discs around the
+        # matched keypoints (not their convex hull, which would include un-cloned
+        # background between the parts of a non-convex object).
+        discs = np.zeros_like(tgt)
+        for x, y in np.round(d_in).astype(int):
+            cv2.circle(discs, (int(x), int(y)), IDENTITY_RADIUS, 1, -1)
+        dz = (discs > 0) & valid
+        fine = 0.0
+        if dz.sum() > 50:
+            na = g - cv2.medianBlur(np.clip(g, 0, 255).astype(np.uint8), 3).astype(np.float32)
+            nb = warped - cv2.medianBlur(np.clip(warped, 0, 255).astype(np.uint8), 3).astype(np.float32)
+            a_, b_ = na[dz] - na[dz].mean(), nb[dz] - nb[dz].mean()
+            fine = float((a_ * b_).sum() / (np.sqrt((a_ * a_).sum() * (b_ * b_).sum()) + 1e-6))
+        verified = float(tgt.sum()) / (h * w)
+        identities.append((len(s_in), fine, verified))
         Minv = cv2.invertAffineTransform(M)
         srcm = cv2.warpAffine(tgt, Minv, (w, h), flags=cv2.INTER_NEAREST)
         mask_dst |= tgt
@@ -141,9 +167,14 @@ def analyze_copymove(d: ImageData) -> Evidence:
                                                             round(float(shift[1] / s), 1)],
                       "linear": np.round(M[:, :2], 3).tolist()})
     area = float((mask_src | mask_dst).mean())
-    score = calibrate(best_in, INLIER_THRESHOLD, INLIER_SOFTNESS)
-    if area < 0.0005:
-        score *= 0.7
+    best_identity = max(identities, key=lambda t: t[0])[1]
+    best_verified = max(identities, key=lambda t: t[0])[2]
+    # Two conditions must both hold: enough geometrically consistent matches, and matching
+    # fine detail. With many matches a lower detail correlation is accepted (re-compression
+    # rewrites the fine detail of a real clone); with few it is not.
+    fine_thr = FINE_THRESHOLD_MANY if best_in >= MANY_INLIERS else FINE_THRESHOLD
+    score = min(calibrate(best_in, INLIER_THRESHOLD, INLIER_SOFTNESS),
+                calibrate(best_identity, fine_thr, FINE_SOFTNESS))
     heat_small = np.maximum(mask_dst.astype(np.float32), 0.6 * mask_src.astype(np.float32))
     heat = cv2.resize(heat_small, (W, H), interpolation=cv2.INTER_LINEAR)
     heat = cv2.GaussianBlur(heat, (0, 0), 2)
@@ -165,10 +196,16 @@ def analyze_copymove(d: ImageData) -> Evidence:
     return Evidence(
         detector=det, title=title, category=Category.MANIPULATION, score=score, confidence=0.8,
         summary=(f"Found {len(transforms)} cloned region pair(s); the strongest is supported by "
-                 f"{best_in} geometrically consistent keypoint matches and covers "
-                 f"{area * 100:.2f}% of the image. Repetitive real-world patterns (tiles, "
-                 f"windows) can also match — check the visual." if score >= 0.5 else
-                 f"Weak self-similarity only ({best_in} consistent matches); no convincing clone."),
+                 f"{best_in} geometrically consistent keypoint matches whose fine detail "
+                 f"(noise, micro-texture) also matches (correlation {best_identity:.2f}); the "
+                 f"pair covers {area * 100:.2f}% of the image." if score >= 0.5 else
+                 (f"{best_in} keypoint matches line up, but the fine detail of the two areas "
+                  f"does not match (correlation {best_identity:.2f}): this looks like genuinely "
+                  f"repeated objects (keys, windows, tiles), not a digital clone."
+                  if best_in >= INLIER_THRESHOLD else
+                  f"Weak self-similarity only ({best_in} consistent matches); no convincing "
+                  f"clone.")),
         details={**info, "transforms": descs, "area_fraction": area,
+                 "fine_detail_corr": best_identity, "verified_area": best_verified,
                  "threshold_inliers": INLIER_THRESHOLD},
         heatmap=heat, regions=regions, visuals={"copymove_matches": vis})

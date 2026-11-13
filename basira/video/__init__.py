@@ -38,7 +38,7 @@ def _keyframe_evidence(fs: FrameScan) -> List[Evidence]:
             detector=det.replace("image.", "video.frame_"), title=best.title + " — key frames",
             category=best.category, score=persistent, confidence=best.confidence * 0.7,
             summary=(f"Detected in {hits} of {len(good)} key frames (strongest at frame "
-                     f"{fi_best}, {fi_best / fs.fps:.2f}s): {best.summary}" if hits else
+                     f"{fi_best}, {fs.time_of(fi_best):.2f}s): {best.summary}" if hits else
                      f"Not detected in any of {len(good)} key frames."),
             details={"per_frame": {str(fi): round(e.score, 3) for fi, e in good},
                      "best_frame": int(fi_best), **{k: v for k, v in best.details.items()
@@ -81,7 +81,7 @@ def analyze_video(path: str, *, max_frames: int = 3000, max_decode: int = 5400,
         report.info.update({"width": fs.width, "height": fs.height, "fps": round(fs.fps, 3),
                             "frames": fs.n_total, "duration": round(fs.duration, 3),
                             "codec": fs.codec, "analysed_every_nth_frame": fs.stride,
-                            "analysed_seconds": round(fs.analysed_frames / fs.fps, 2),
+                            "analysed_seconds": round(fs.analysed_seconds, 2),
                             "truncated": fs.truncated})
         cuts: List[int] = []
         for name, title, fn in (("video.freeze", "Frozen / duplicated frames", detect_freeze),

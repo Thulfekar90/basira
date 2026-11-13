@@ -15,7 +15,7 @@ frame, a gray histogram and a sensor-noise estimate. From these:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -52,6 +52,21 @@ class FrameScan:
     codec: str = ""
 
     pts: Optional[np.ndarray] = None  # presentation time (s) of each analysed frame
+    key_pts: Dict[int, float] = field(default_factory=dict)
+
+    def time_of(self, frame_index: int) -> float:
+        """Presentation time of a frame (exact for key frames, else nearest analysed frame)."""
+        if frame_index in self.key_pts:
+            return float(self.key_pts[frame_index])
+        if self.pts is not None and len(self.idx):
+            return float(self.pts[int(np.argmin(np.abs(self.idx - frame_index)))])
+        return frame_index / max(self.fps, 1e-6)
+
+    @property
+    def analysed_seconds(self) -> float:
+        if self.pts is not None and len(self.pts):
+            return float(self.pts[-1])
+        return self.analysed_frames / max(self.fps, 1e-6)
 
     @property
     def t(self) -> np.ndarray:
@@ -82,7 +97,10 @@ def scan_frames(path: str, max_frames: int = 3000, n_key: int = 5,
                 max_decode: int = 5400) -> FrameScan:
     """Decode once. Every frame is analysed when the clip has <= ``max_frames`` frames;
     longer clips are analysed up to ``max_decode`` decoded frames (see ``truncated``)."""
-    cap = cv2.VideoCapture(path)
+    from ..core.io import _enforce_opencv_whitelist
+
+    _enforce_opencv_whitelist()               # re-assert: the environment may have changed
+    cap = cv2.VideoCapture(path, cv2.CAP_FFMPEG)
     if not cap.isOpened():
         raise RuntimeError("OpenCV could not open this video")
     fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
@@ -98,6 +116,7 @@ def scan_frames(path: str, max_frames: int = 3000, n_key: int = 5,
     stride = max(1, int(np.ceil(span / max_frames)))
     key_targets = set(np.linspace(0.12, 0.88, n_key) * max(span, 1) // 1)
     idx, thumbs, noise, keys, pts = [], [], [], [], []
+    key_pts: Dict[int, float] = {}
     i = 0
     while True:
         if not cap.grab():
@@ -116,6 +135,7 @@ def scan_frames(path: str, max_frames: int = 3000, n_key: int = 5,
                 pts.append(cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0)
             if want_key:
                 keys.append((i, cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)))
+                key_pts[i] = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
         i += 1
         if i >= max_decode:
             break
@@ -141,7 +161,7 @@ def scan_frames(path: str, max_frames: int = 3000, n_key: int = 5,
             np.any(np.diff(pts_arr) < 0):
         pts_arr = None                      # decoder gave no usable timestamps
     return FrameScan(fps=fps, n_total=max(n_total, i), width=w, height=h, stride=stride,
-                     pts=pts_arr,
+                     pts=pts_arr, key_pts=key_pts if pts_arr is not None else {},
                      analysed_frames=i, truncated=truncated,
                      idx=np.asarray(idx), thumbs=T, diff=d, hist=hd, noise=np.asarray(noise),
                      keyframes=keys, codec=codec)

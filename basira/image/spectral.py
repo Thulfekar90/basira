@@ -22,15 +22,23 @@ import numpy as np
 from scipy.ndimage import median_filter
 
 from ..core.types import Category, Evidence
-from ..core.utils import calibrate, robust_z
+from ..core.utils import calibrate
 from .common import cohesive_anomaly, heat_from_z, regions_from_mask
 from .load import ImageData
 
 TILE = 256
 PEAK_THRESHOLD = 5.0       # dB above local background for a lattice peak to count
-SPEC_STAT_THRESHOLD = 3.0    # dB above the off-lattice null reference
-SPEC_STAT_SOFTNESS = 1.0
+# dB above the off-lattice null reference. Camera originals are not flat here: demosaicing
+# and in-camera sharpening leave lattice peaks of their own (183 Columbia originals:
+# median 1.0 dB, 99th percentile 7.2 dB, maximum 7.6 dB), so the threshold sits above them.
+SPEC_STAT_THRESHOLD = 10.0
+SPEC_STAT_SOFTNESS = 1.5
 CFA_RATIO_THRESHOLD = 1.06   # mean|e| ratio between the two green lattices
+CFA_BLOCK = 32
+CFA_INVERSION_MARGIN = 0.15  # block log-ratio below -margin = opposite Bayer phase
+# Cluster statistic of phase-inverted blocks. Columbia: 0 of 183 originals reach 0.05.
+CFA_STAT_THRESHOLD = 0.10
+CFA_STAT_SOFTNESS = 0.025
 
 
 def _residual(gray: np.ndarray) -> np.ndarray:
@@ -177,11 +185,21 @@ def analyze_spectral(d: ImageData) -> Evidence:
         visuals={"residual_spectrum": spec_vis})
 
 
+def _inversion_heat(z: np.ndarray, shape) -> np.ndarray:
+    """Solid map of the phase-inverted area: flat or dark blocks inside a pasted region
+    carry no CFA reading of their own, so gaps between inverted blocks are closed."""
+    inv = (z > 2.0).astype(np.uint8)
+    inv = cv2.morphologyEx(inv, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    inv = cv2.morphologyEx(inv, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    heat = cv2.resize(inv.astype(np.float32), (shape[1], shape[0]), interpolation=cv2.INTER_LINEAR)
+    return cv2.GaussianBlur(heat, (0, 0), max(2.0, min(shape) / 120))
+
+
 def analyze_cfa(d: ImageData) -> Evidence:
     det, title = "image.cfa", "Camera demosaicing (CFA) consistency"
     if min(d.rgb.shape[:2]) < 128:
         return Evidence.not_applicable(det, title, Category.MANIPULATION, "image too small")
-    ratio, texture, glob = cfa_map(d.rgb)
+    ratio, texture, glob = cfa_map(d.rgb, CFA_BLOCK)
     info = {"global_ratio": glob, "threshold": CFA_RATIO_THRESHOLD}
     if glob < CFA_RATIO_THRESHOLD:
         why = ("JPEG compression at this quality usually erases them" if d.is_jpeg and
@@ -191,8 +209,7 @@ def analyze_cfa(d: ImageData) -> Evidence:
             detector=det, title=title, category=Category.MANIPULATION, score=0.0, confidence=0.05,
             summary=f"No global demosaicing pattern (ratio {glob:.3f}); {why}. Local CFA "
                     f"consistency cannot be checked.", details=info)
-    # A generator's periodic imprint can mimic the 2-periodic CFA pattern: if the residual
-    # spectrum shows non-camera lattice peaks, the CFA reading is not trustworthy.
+    # A generator's periodic imprint can mimic the 2-periodic CFA pattern.
     if not d.is_jpeg and min(d.rgb.shape[:2]) >= TILE:
         gray = cv2.cvtColor(d.rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
         peaks, excess = lattice_peaks(residual_spectrum(gray), 8)
@@ -200,21 +217,27 @@ def analyze_cfa(d: ImageData) -> Evidence:
             return Evidence.not_applicable(det, title, Category.MANIPULATION,
                                            "periodic generator-like artefacts mask the CFA pattern",
                                            **info)
+    # In a single-camera image the *same* green lattice is the acquired one everywhere, so
+    # the block ratio stays above 1. A region whose ratio is clearly below 1 has the
+    # opposite Bayer phase: it was demosaiced on a different grid, i.e. it comes from
+    # another image (or was shifted by an odd number of pixels). Regions pasted with the
+    # same phase are invisible to this test, which bounds its recall near one half.
     lr = np.log(np.maximum(ratio, 1e-3))
     valid = texture > np.percentile(texture, 20)
-    z = -robust_z(np.where(valid, lr, np.nan))    # positive where CFA trace is missing
-    z = np.where(valid, z, 0.0)
-    stat, comp, cinfo = cohesive_anomaly(z, thr=2.5)
-    score = calibrate(stat, 0.22, 0.08)
-    conf = float(np.clip((glob - 1) * 4, 0.2, 0.7))
+    z = np.where(valid, (-lr) / CFA_INVERSION_MARGIN * 2.0, 0.0)   # z > 2 <=> lr < -margin
+    stat, comp, cinfo = cohesive_anomaly(z, thr=2.0, min_blocks=4)
+    score = calibrate(stat, CFA_STAT_THRESHOLD, CFA_STAT_SOFTNESS)
+    conf = float(np.clip((glob - 1) * 4, 0.3, 0.75))
     H, W = d.rgb.shape[:2]
     return Evidence(
         detector=det, title=title, category=Category.MANIPULATION, score=score, confidence=conf,
-        summary=(f"The image carries camera demosaicing traces (ratio {glob:.3f}) except in a "
-                 f"compact region ({cinfo['frac'] * 100:.1f}% of blocks) where they vanish — "
-                 f"that region was likely pasted, retouched or synthesised." if score >= 0.5 else
-                 f"Camera demosaicing traces are present and spatially consistent "
-                 f"(ratio {glob:.3f})."),
-        details={**info, "statistic": stat, **cinfo},
-        heatmap=heat_from_z(z, (H, W), 1.5, 5.0),
-        regions=regions_from_mask(comp, 32, 32, score, "missing CFA trace") if score >= 0.5 else [])
+        summary=(f"The image carries camera demosaicing traces (ratio {glob:.3f}), but a compact "
+                 f"region ({cinfo['frac'] * 100:.1f}% of blocks) has the opposite colour-filter "
+                 f"phase: it was demosaiced on a different pixel grid, so it comes from another "
+                 f"image or was moved." if score >= 0.5 else
+                 f"Camera demosaicing traces are present with one consistent colour-filter phase "
+                 f"(ratio {glob:.3f}). A region pasted with the same phase would not show here."),
+        details={**info, "statistic": stat, "stat_threshold": CFA_STAT_THRESHOLD, **cinfo},
+        heatmap=_inversion_heat(z, (H, W)) if score >= 0.5 else heat_from_z(z, (H, W), 1.5, 5.0) * 0.5,
+        regions=regions_from_mask(comp, CFA_BLOCK, CFA_BLOCK, score, "opposite CFA phase")
+        if score >= 0.5 else [])
