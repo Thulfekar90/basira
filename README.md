@@ -42,7 +42,7 @@ Design choices that differ from most detectors:
 - **Evidence, not a magic number.** Every detector is a documented signal-processing method that outputs its raw statistic, its threshold, a plain-language sentence and a map or time range. Nothing is a black box.
 - **Calibrated to stay quiet.** A detector's score is 0.5 exactly at its decision threshold, and thresholds are set from measured clean-file distributions. Quiet detectors add nothing to the verdict.
 - **It never says "authentic".** The best possible result is *"No significant traces found"*, because re-compression, resizing and careful editing erase traces.
-- **No model downloads, no network, no GPU.** `pip install` and run. Files never leave your machine.
+- **No model downloads, no network, no GPU.** `pip install` and run. Files never leave your machine; decoders are restricted to local files and playlist / reference formats are refused.
 
 ## Install
 
@@ -78,22 +78,38 @@ The HTML report is a single self-contained file: verdict, the localisation map o
 
 ## Measured results
 
-All numbers below come from `benchmarks/synthetic_images.py`, `benchmarks/synthetic_audio.py` and `tests/test_video.py` in this repository. **They are synthetic**: forgeries are generated with known ground truth from a simulated camera pipeline (Bayer sampling, sensor noise, demosaicing, JPEG). They prove the implementation works and set the thresholds. They are **not** a claim about performance on real-world data — see [Limitations](#limitations-read-this) and evaluate on your own data with `benchmarks/evaluate_folder.py`.
+Every number here is produced by a script in this repository, so you can re-run it.
 
-**Images** — 16 images per family, default thresholds:
+### Real image content
 
-| Family | Flagged ("Suspicious" or worse) | Median localisation contrast¹ |
+`benchmarks/real_content.py` cuts real photographs and real video frames into 1024×768 photos, simulates a camera save, and builds forgeries with ground truth. Run on 34 textured crops from two photographs and one 4K video (not bundled: point the script at your own folder):
+
+| Family | Flagged ("Suspicious" or worse) | Edit correctly located |
 |---|---|---|
-| Clean camera JPEG | **0 / 16** | – |
-| Clean, saved twice | **0 / 16** | – |
-| Splice from another photo | 16 / 16 | 53× |
-| Copy-move | 15 / 16 | 109× |
-| JPEG cut-out pasted off-grid | 16 / 16 | 35× |
-| Smooth in-painting ("generative fill" stand-in) | 8 / 16 | 58× |
+| Clean, one save | **0 / 34** | – |
+| Clean, saved twice | **0 / 34** | – |
+| Splice from another photo | 27 / 34 | 27 / 34 |
+| Copy-move | 29 / 34 | 29 / 34 |
+| Object removal (OpenCV in-painting) | 13 / 34 | 13 / 34 |
 
-¹ mean heat inside the true edited area ÷ mean heat outside.
+What happens after the forgery is post-processed the way platforms do it:
 
-**Audio** — `benchmarks/synthetic_audio.py`, 10 recordings of 30 s, edits at random positions, located = flagged with a segment within 0.5 s of the true edit:
+| Flagged after… | re-save Q85 | re-save Q70 | re-save Q50 | downscale 75% | downscale 50% |
+|---|---|---|---|---|---|
+| Clean (false positives) | 0 / 34 | 0 / 34 | 0 / 34 | 0 / 34 | 0 / 34 |
+| Splice | 12 / 34 | 2 / 34 | 1 / 34 | 1 / 34 | 1 / 34 |
+| Copy-move | 28 / 34 | 24 / 34 | 22 / 34 | 23 / 34 | 17 / 34 |
+| Object removal | 5 / 34 | 0 / 34 | 0 / 34 | 1 / 34 | 0 / 34 |
+
+Read that table carefully: **zero false alarms in 238 clean files, but compression-history traces (splice, in-painting) are gone after one more lossy save.** Only geometric evidence (copy-move) survives. Crops without texture (blank sky, fog) are excluded: an edit there leaves nothing to measure.
+
+### Synthetic, with a simulated camera
+
+`benchmarks/synthetic_images.py` (Bayer sampling, sensor noise, demosaicing, JPEG), 16 images per family: clean 0 / 32 flagged; splice 16 / 16; copy-move 15 / 16; JPEG cut-out pasted off-grid 16 / 16; smooth in-painting 8 / 16. Median localisation contrast (heat inside the edited area ÷ outside) is above 50× for every family.
+
+### Audio
+
+`benchmarks/synthetic_audio.py`, 10 recordings of 30 s (speech-like signal, room noise, weak mains hum), edits at random positions; located = flagged with a segment within 0.5 s of the true edit:
 
 | Family | Result |
 |---|---|
@@ -102,9 +118,11 @@ All numbers below come from `benchmarks/synthetic_images.py`, `benchmarks/synthe
 | 3 s inserted from another room | 10 / 10 |
 | 0.3 s of digital silence inserted | 10 / 10 |
 
-A 10-minute 48 kHz file analyses in about 5 s.
+A 10-minute 48 kHz file analyses in about 5 s. Audio has only been measured on synthetic recordings.
 
-**Video** — clean clips 0 flagged; removed frames, replayed footage, frozen frames and inserted foreign footage each located to within 0.25 s; a previous encoding's GOP length recovered exactly for streams without B-frames.
+### Video
+
+`tests/test_video.py`: clean clips 0 flagged; removed frames, replayed footage, frozen frames and inserted foreign footage each located to within 0.25 s; a previous encoding's GOP length recovered exactly for streams without B-frames. Video has only been measured on synthetic clips, plus false-positive checks on two real 4K videos.
 
 While testing false positives on stock texture images that ship with macOS, the copy-move detector flagged several stone textures. They turned out to be real clone-stamp retouching by the texture artist (dozens to hundreds of geometrically consistent matches).
 
@@ -112,9 +130,9 @@ While testing false positives on stock texture images that ship with macOS, the 
 
 - **"Is this AI-generated?" is the weakest question here.** Without a trained model, Basira answers it reliably only through provenance: generator metadata, C2PA Content Credentials and IPTC `trainedAlgorithmicMedia` labels (decisive when present — and trivially stripped). The pixel-level generator fingerprint works on lossless files that were not resized; it is blind on JPEGs, because JPEG's 8×8 blocking occupies the same frequencies. The audio "TTS-like" cues also fire on noise-gated and phone audio and are weighted low on purpose. A modern diffusion image re-saved by a social network will usually come back as *"No significant traces found"*.
 - **Localising edits is the strong part**, but each method has a precondition. The double-quantisation map needs a JPEG that was saved at least twice with the grid intact; noise analysis needs a region large enough to measure and loses power under heavy compression; copy-move needs texture (clones of flat sky are invisible) and also matches genuinely repeated objects.
-- **Resizing, screenshots and platform re-compression destroy most traces.** That is physics, not a bug.
+- **Resizing, screenshots and platform re-compression destroy most traces** — see the robustness table above. An image that went through WhatsApp, X or Instagram has usually lost the splice and in-painting evidence. That is physics, not a bug.
 - **Video**: the double-compression test is unreliable when the stream uses B-frames (stated in its output); a deliberate jump cut looks the same as removed frames; codecs flatten the noise differences between sources.
-- **No real-world benchmark yet.** Results on CASIA, Columbia, IMD2020, ASVspoof and similar sets are not published here because they have not been run. Contributions with reproducible numbers are very welcome.
+- **No public-dataset benchmark yet.** The real-content numbers above use forgeries this project generated; results on CASIA, Columbia, IMD2020, ASVspoof and similar sets have not been run. Use `benchmarks/evaluate_folder.py` on them; contributions with reproducible numbers are very welcome.
 - A forensic tool gives leads for a human examiner. Do not use its output as the sole basis for an accusation.
 
 ## How it decides
@@ -126,8 +144,9 @@ Each detector returns `score` (0.5 = its threshold) and `confidence` (how applic
 ```bash
 git clone https://github.com/OWNER/basira.git && cd basira
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest                      # 56 tests, ~90 s
-.venv/bin/python benchmarks/synthetic_images.py # the image table above
+.venv/bin/python -m pytest                      # 68 tests, ~95 s
+.venv/bin/python benchmarks/synthetic_images.py # synthetic image numbers
+.venv/bin/python benchmarks/real_content.py --sources ~/Pictures/some_folder --robust
 .venv/bin/python examples/make_demo.py          # demo forgeries, figures and HTML reports
 ```
 

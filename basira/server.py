@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import tempfile
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,7 +35,8 @@ const drop=document.getElementById('drop'),f=document.getElementById('f'),st=doc
 drop.addEventListener('drop',ev=>{if(ev.dataTransfer.files[0])send(ev.dataTransfer.files[0])});
 f.addEventListener('change',()=>{if(f.files[0])send(f.files[0])});
 async function send(file){st.textContent='Analysing '+file.name+' …';
- try{const r=await fetch('/analyze?name='+encodeURIComponent(file.name),{method:'POST',body:file});
+ try{const r=await fetch('/analyze?name='+encodeURIComponent(file.name),{method:'POST',body:file,
+  headers:{'X-Basira-Token':'%s'}});
  const t=await r.text();if(!r.ok){st.textContent='Error: '+t;return}
  document.open();document.write(t);document.close();history.pushState({},'','/report')}
  catch(e){st.textContent='Error: '+e}}
@@ -56,17 +58,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _local_request(self) -> bool:
+        """Only accept requests addressed to this loopback server by name. This is what
+        defeats DNS rebinding: a hostile page reaches us under *its* hostname."""
+        return self.headers.get("Host", "") in self.server.allowed_hosts
+
     def do_GET(self):
-        self._send(200, (PAGE % (CSS, __version__)).encode("utf-8"))
+        if not self._local_request():
+            return self._send(403, b"forbidden", "text/plain")
+        if self.path.split("?")[0] not in ("/", "/report"):
+            return self._send(404, b"not found", "text/plain")
+        self._send(200, (PAGE % (CSS, __version__, self.server.token)).encode("utf-8"))
 
     def do_POST(self):
         if not self.path.startswith("/analyze"):
             return self._send(404, b"not found", "text/plain")
-        # Refuse cross-origin posts: only the page served by this process may upload.
         origin = self.headers.get("Origin", "")
-        host = self.headers.get("Host", "")
-        if origin and origin.split("://", 1)[-1] != host:
-            return self._send(403, b"cross-origin request refused", "text/plain")
+        if not self._local_request() or \
+                (origin and origin.split("://", 1)[-1] not in self.server.allowed_hosts) or \
+                not secrets.compare_digest(self.headers.get("X-Basira-Token", ""),
+                                           self.server.token):
+            return self._send(403, b"request refused", "text/plain")
         n = int(self.headers.get("Content-Length", "0") or 0)
         if n <= 0 or n > MAX_UPLOAD:
             return self._send(400, b"empty or too large upload", "text/plain")
@@ -94,6 +106,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve(port: int = 8642, open_browser: bool = True) -> int:
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv.allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    srv.token = secrets.token_urlsafe(24)       # embedded in the page, required to upload
     url = f"http://127.0.0.1:{port}/"
     print(f"Basira is listening on {url}  (Ctrl+C to stop)")
     if open_browser:

@@ -111,3 +111,6 @@ def test_audio_track_becomes_child_report(out):
     sil = r.children[0].get("audio.silence")
     assert sil is not None and sil.score > 0.5 and _near(sil.segments, 4.0, 0.4)
     assert r.scores["manipulation"] > 0.3
+    # The finding must surface on the video report itself, not only in the child.
+    assert any("audio track" in s.label and abs(s.start - 4.0) < 0.5 for s in r.fused_segments)
+    assert any(x.startswith("[audio track]") for x in r.explanation)

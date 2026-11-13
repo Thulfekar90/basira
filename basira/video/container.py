@@ -75,11 +75,18 @@ def parse_mp4(path: str) -> Optional[Dict[str, Any]]:
         return None
     if not moov:
         return None
+    try:
+        return _parse_moov(moov)
+    except (IndexError, ValueError, struct.error):
+        return None        # malformed tables: treat as "no usable sample table"
+
+
+def _parse_moov(moov: bytes) -> Dict[str, Any]:
     out: Dict[str, Any] = {"tracks": 0, "edit_entries": 0}
     for typ, s, e in _boxes(moov, 0, len(moov)):
-        if typ == b"mvhd":
+        if typ == b"mvhd" and s + 20 <= e:
             ver = moov[s]
-            if ver == 0 and s + 20 <= e:
+            if ver == 0:
                 c, m, ts, dur = struct.unpack(">IIII", moov[s + 4:s + 20])
                 out.update(creation=c, modification=m, timescale=ts, duration=dur / max(ts, 1))
         if typ != b"trak":
@@ -92,28 +99,31 @@ def parse_mp4(path: str) -> Optional[Dict[str, Any]]:
             for t2, s2, e2 in _boxes(moov, a, b):
                 if t2 in CONTAINERS:
                     stack.append((s2 + (4 if t2 == b"meta" else 0), e2))
-                elif t2 == b"hdlr":
+                elif t2 == b"hdlr" and s2 + 12 <= e2:
                     trk["handler"] = moov[s2 + 8:s2 + 12]
-                elif t2 == b"elst":
+                elif t2 == b"elst" and s2 + 8 <= e2:
                     ver = moov[s2]
                     n = struct.unpack(">I", moov[s2 + 4:s2 + 8])[0]
+                    step = 20 if ver == 1 else 12
                     p = s2 + 8
+                    # Every entry must lie inside this box; never read a sibling's bytes.
                     for _ in range(min(n, 64)):
+                        if ver not in (0, 1) or p + step > e2:
+                            break
                         if ver == 1:
                             d, mt = struct.unpack(">Qq", moov[p:p + 16])
-                            p += 20
                         else:
                             d, mt = struct.unpack(">Ii", moov[p:p + 8])
-                            p += 12
+                        p += step
                         trk["edits"].append((d, mt))
-                elif t2 == b"stsz":
+                elif t2 == b"stsz" and s2 + 12 <= e2:
                     fixed, n = struct.unpack(">II", moov[s2 + 4:s2 + 12])
-                    if fixed == 0 and n > 0 and s2 + 12 + 4 * n <= e2:
+                    if fixed == 0 and 0 < n <= 20_000_000 and s2 + 12 + 4 * n <= e2:
                         trk["sizes"] = np.frombuffer(moov, dtype=">u4", count=n, offset=s2 + 12
                                                      ).astype(np.float64)
-                elif t2 == b"stss":
+                elif t2 == b"stss" and s2 + 8 <= e2:
                     n = struct.unpack(">I", moov[s2 + 4:s2 + 8])[0]
-                    if s2 + 8 + 4 * n <= e2:
+                    if 0 < n and s2 + 8 + 4 * n <= e2:
                         trk["sync"] = np.frombuffer(moov, dtype=">u4", count=n, offset=s2 + 8
                                                     ).astype(np.int64) - 1
                 elif t2 == b"ctts":

@@ -155,7 +155,7 @@ def thumbnail(rgb: np.ndarray, max_side: int = 960) -> np.ndarray:
         return rgb
     import cv2
 
-    return cv2.resize(rgb, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA)
+    return cv2.resize(rgb, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA)
 
 
 def png_b64(img: np.ndarray, max_side: int = 960) -> str:

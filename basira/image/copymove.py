@@ -48,7 +48,7 @@ def analyze_copymove(d: ImageData) -> Evidence:
     s = min(1.0, MAX_SIDE / max(H, W))
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     if s < 1:
-        gray = cv2.resize(gray, (int(W * s), int(H * s)), interpolation=cv2.INTER_AREA)
+        gray = cv2.resize(gray, (max(1, int(W * s)), max(1, int(H * s))), interpolation=cv2.INTER_AREA)
     h, w = gray.shape
     if min(h, w) < 64:
         return Evidence.not_applicable(det, title, Category.MANIPULATION, "image too small")

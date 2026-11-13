@@ -15,17 +15,17 @@ import cv2
 import numpy as np
 
 from ..core.types import Category, Evidence
-from ..core.utils import calibrate, robust_z
+from ..core.utils import calibrate
 from .common import cohesive_anomaly, heat_from_z, regions_from_mask
 from .load import ZIGZAG, ImageData
 
 N_FREQ = 20              # first AC coefficients in zig-zag order
 HIST_RANGE = 48
 NOISE_FLOOR = 4.0        # |coefficient| below this is pixel-rounding noise between saves
-PERIOD_MIN_STRENGTH = 0.30
+PERIOD_MIN_STRENGTH = 3.0    # between-phase / within-phase variance of the folded histogram
 MIN_PERIODIC_FREQS = 3
-DQ_STAT_THRESHOLD = 0.30   # clean re-saved images measured <= 0.16, splices >= 0.44
-DQ_STAT_SOFTNESS = 0.04
+DQ_STAT_THRESHOLD = 0.06   # clean double-saved images measured <= 0.03 (real and synthetic)
+DQ_STAT_SOFTNESS = 0.015
 
 
 def _dct_matrix() -> np.ndarray:
@@ -48,36 +48,39 @@ def block_dct(y: np.ndarray) -> np.ndarray:
 
 
 def _period(h: np.ndarray, center: int) -> Tuple[int, float]:
-    """Detect a periodic pattern in a coefficient histogram. Returns (period, strength)."""
+    """Detect the comb left by double quantisation in a coefficient histogram.
+
+    For each candidate period p the histogram is divided by its own moving average over
+    exactly one period (which flattens any comb of that period) and folded at p. A real
+    comb gives phase means that differ strongly *and consistently*: the variance between
+    phases must dominate the variance within phases, with a modulation of at least 30%.
+    A smooth single-compression histogram fails both tests, whatever its Poisson noise.
+    Returns (period, strength); period 1 means "no comb".
+    """
     hf = h.astype(np.float64)
-    smooth = np.convolve(hf, np.ones(7) / 7, mode="same")
     idx = np.arange(len(h)) - center
-    ok = (smooth > 4) & (np.abs(idx) >= 1)
-    if ok.sum() < 12:
-        return 1, 0.0
-    hn = np.where(ok, hf / np.maximum(smooth, 1e-9) - 1.0, np.nan)
-    total_var = np.nanvar(hn)
-    if not np.isfinite(total_var) or total_var < 1e-4:
-        return 1, 0.0
-    best_p, best_s, strengths = 1, 0.0, {}
+    best_p, best_r = 1, 0.0
     for p in range(2, 11):
-        means = []
+        kern = np.ones(p + 1)
+        kern[0] = kern[-1] = 0.5              # centred window spanning one full period
+        trend = np.convolve(hf, kern / p, mode="same")
+        ok = (trend >= 8) & (np.abs(idx) >= 2)
+        if ok.sum() < 4 * p:
+            continue
+        hn = hf / np.maximum(trend, 1e-9) - 1.0
+        means, within = [], []
         for ph in range(p):
-            sel = hn[(idx % p) == ph]
-            sel = sel[np.isfinite(sel)]
-            if sel.size < 2:
+            sel = hn[ok & ((idx % p) == ph)]
+            if sel.size < 3:
                 break
             means.append(sel.mean())
+            within.append(sel.var())
         else:
-            strengths[p] = float(np.var(means) / total_var)
-    if not strengths:
-        return 1, 0.0
-    smax = max(strengths.values())
-    for p in sorted(strengths):  # smallest period close to the best (avoid multiples)
-        if strengths[p] >= 0.8 * smax:
-            best_p, best_s = p, strengths[p]
-            break
-    return (best_p, best_s) if best_s >= PERIOD_MIN_STRENGTH else (1, best_s)
+            means = np.asarray(means)
+            ratio = float(means.var() / (np.mean(within) + 1e-4))
+            if np.ptp(means) >= 0.3 and ratio > best_r * 1.25:   # prefer the fundamental
+                best_p, best_r = p, ratio
+    return (best_p, best_r) if best_r >= PERIOD_MIN_STRENGTH else (1, best_r)
 
 
 def analyze_double_quantization(d: ImageData) -> Evidence:
@@ -93,6 +96,8 @@ def analyze_double_quantization(d: ImageData) -> Evidence:
     sat = ((raw_blocks <= 1) | (raw_blocks >= 254)).mean(axis=(1, 3)) > 0.1
     Q = d.quant
     L = np.zeros((hb, wb))
+    EU = np.zeros((hb, wb))
+    ET = np.zeros((hb, wb))
     N = np.zeros((hb, wb))
     periodic: List[Dict] = []
     for zz in range(1, N_FREQ + 1):
@@ -116,10 +121,22 @@ def analyze_double_quantization(d: ImageData) -> Evidence:
         win = csum[np.clip(start + p, 0, len(h))] - csum[np.clip(start, 0, len(h))]
         pu = (h + 0.5) / (win + 0.5 * p)
         llr_tab = np.clip(np.log((1.0 / p) / pu), -3, 3)
-        llr_tab[(widx == 0) | (win < 20)] = 0.0
-        informative = use & (llr_tab[np.clip(k + HIST_RANGE, 0, len(h) - 1)] != 0) & \
-            (np.abs(k) * q >= NOISE_FLOOR)
-        L += np.where(informative, llr_tab[np.clip(k + HIST_RANGE, 0, len(h) - 1)], 0.0)
+        dead = (widx == 0) | (win < 20)
+        llr_tab[dead] = 0.0
+        # Expected LLR of a coefficient in each period window under both hypotheses:
+        # "untouched" (follows the double-compression histogram) and "tampered"
+        # (uniform inside the window). Normalising by these removes the dependence on
+        # *which* windows a block's coefficients fall in, i.e. on local texture.
+        wkey = (widx - widx.min()).astype(np.int64)
+        eu_w = np.bincount(wkey, weights=pu * llr_tab)
+        et_w = np.bincount(wkey, weights=llr_tab / p)
+        eu_tab, et_tab = eu_w[wkey], et_w[wkey]
+        eu_tab[dead], et_tab[dead] = 0.0, 0.0
+        ki = np.clip(k + HIST_RANGE, 0, len(h) - 1)
+        informative = use & ~dead[ki] & (np.abs(k) * q >= NOISE_FLOOR)
+        L += np.where(informative, llr_tab[ki], 0.0)
+        EU += np.where(informative, eu_tab[ki], 0.0)
+        ET += np.where(informative, et_tab[ki], 0.0)
         N += informative
     info = {"periodic_frequencies": len(periodic), "periods": periodic[:10],
             "last_quality": d.jpeg_quality}
@@ -129,21 +146,25 @@ def analyze_double_quantization(d: ImageData) -> Evidence:
             summary="No double-compression periodicity found (image looks single-compressed, "
                     "or was resized / re-saved with a non-aligned grid). This detector cannot "
                     "localise edits in that case.", details=info)
-    # Average evidence per informative coefficient over a 3x3 block neighbourhood.
-    num = cv2.blur(L.astype(np.float32), (3, 3))
-    den = cv2.blur(N.astype(np.float32), (3, 3))
-    enough = den >= 2.5                       # >= ~22 informative coefficients nearby
-    Ls = np.where(enough, num / (den + 0.5), np.nan)
-    if np.isfinite(Ls).sum() < 50:
+    # Block score over a 3x3 neighbourhood: 0 = behaves like the doubly-compressed
+    # majority, 1 = behaves like content compressed only once. It is an absolute scale,
+    # so it also works when the edited area is large.
+    k3 = (3, 3)
+    num = cv2.blur((L - EU).astype(np.float32), k3)
+    span = cv2.blur((ET - EU).astype(np.float32), k3)
+    den = cv2.blur(N.astype(np.float32), k3)
+    enough = (den >= 2.5) & (span > 0.5)      # >= ~22 informative coefficients nearby
+    if enough.sum() < 50:
         return Evidence(detector=det, title=title, category=Category.MANIPULATION, score=0.0,
                         confidence=0.1, summary="Too few informative DCT coefficients to map "
                         "double compression.", details=info)
-    z = np.where(enough, robust_z(Ls), 0.0)
+    frac_single = np.where(enough, np.clip(num / np.maximum(span, 1e-6), -0.5, 1.5), 0.0)
+    z = frac_single * 5.0                     # cluster where the score exceeds 0.5
     stat, comp, cinfo = cohesive_anomaly(z, thr=2.5)
     score = calibrate(stat, DQ_STAT_THRESHOLD, DQ_STAT_SOFTNESS)
     conf = 0.8 if len(periodic) >= 5 else 0.6
     H, W = d.rgb.shape[:2]
-    heat = heat_from_z(z, (H, W), lo=2.5, hi=6.0)
+    heat = heat_from_z(z, (H, W), lo=2.0, hi=5.0)
     return Evidence(
         detector=det, title=title, category=Category.MANIPULATION, score=score, confidence=conf,
         summary=(f"The image was JPEG-compressed at least twice ({len(periodic)} DCT frequencies "

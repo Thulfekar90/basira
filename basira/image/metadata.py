@@ -80,14 +80,17 @@ def _generator_from_text(info: Dict[str, Any]) -> List[Dict[str, str]]:
                     continue
             except Exception:
                 continue
-        hits.append({"label": label, "key": key, "snippet": snippet})
+        hits.append({"label": label, "key": key, "snippet": snippet, "strong": True})
+    # A generator named in the Software field is the writer identifying itself. The same
+    # name in a title or description is ordinary prose ("Firefly at night"): a hint only.
     for key in ("Software", "Comment", "Description", "Source", "Title"):
         v = info.get(key)
         if isinstance(v, (str, bytes)):
             txt = v.decode("utf-8", "ignore") if isinstance(v, bytes) else v
-            if re.search(r"NovelAI|Stable Diffusion|Midjourney|DALL.?E|Firefly|Imagen|FLUX",
-                         txt, re.I):
-                hits.append({"label": txt.strip()[:80], "key": key, "snippet": txt[:220]})
+            if re.search(r"NovelAI|Stable Diffusion|Midjourney|DALL.?E\b|Adobe Firefly|"
+                         r"Imagen\b|FLUX\.1", txt):
+                hits.append({"label": txt.strip()[:80], "key": key, "snippet": txt[:220],
+                             "strong": key == "Software"})
     return hits
 
 
@@ -128,7 +131,7 @@ def analyze_metadata(d: ImageData) -> List[Evidence]:
     ai_types = [t for t in src_types if "Algorithmic" in t or "Synthetic" in t or
                 t in ("trainedAlgorithmicMedia", "compositeWithTrainedAlgorithmicMedia")]
     if gen_text or ai_types or ai_sigs:
-        strong = bool(gen_text or ai_types)
+        strong = bool(ai_types) or any(g.get("strong") for g in gen_text)
         labels = [g["label"] for g in gen_text] + [f"IPTC:{t}" for t in ai_types] + \
             [s["label"] for s in ai_sigs]
         partial = any("composite" in t.lower() for t in ai_types)

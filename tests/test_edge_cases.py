@@ -76,7 +76,8 @@ def test_garbage_and_hostile_mp4(d):
         p = os.path.join(d, name)
         open(p, "wb").write(b"\x00\x00\x00\x18ftypmp42" + body)
         r = basira.analyze(p)                 # must not raise
-        assert r.verdict_level == 0
+        # ...and must not present an undecodable file as a clean result.
+        assert r.verdict_level == 1 and "could not be analysed" in r.verdict
         json.dumps(r.to_dict())
 
 

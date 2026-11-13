@@ -118,10 +118,38 @@ def finalize(report: Report, spatial_shape=None) -> Report:
                               "authenticity: skilled edits and strong re-compression can "
                               "erase the traces these detectors rely on."]
 
+    # Findings of child reports (a video's sound track) must be visible on the parent.
+    child_segments: List[Segment] = []
+    for c in report.children:
+        tag = f"{c.media_type} track"
+        if max(c.scores.get("manipulation", 0), c.scores.get("ai_generation", 0)) >= 0.2:
+            lines = [x for x in c.explanation if x.startswith("[")][:3]
+            if report.explanation and report.explanation[0].startswith("No detector"):
+                report.explanation = []
+            report.explanation.extend(f"[{tag}] {x}" for x in lines)
+        child_segments.extend(Segment(s.start, s.end, s.score, f"{tag}: {s.label}")
+                              for s in c.fused_segments)
+
+    # A detector crash or an undecodable file is not a clean bill of health.
+    failed = [e for e in evs if e.error]
+    content_ok = any(e.error is None and e.confidence > 0 and
+                     e.category in (Category.MANIPULATION,) for e in evs) or \
+        any(c.evidences for c in report.children)
+    report.info["detectors_failed"] = len(failed)
+    if failed and not content_ok and report.verdict_level == 0:
+        report.verdict_level = 1
+        report.verdict = "Inconclusive (content could not be analysed)"
+        report.explanation = [f"[{e.title}] {e.summary}" for e in failed[:4]] + [
+            "No content detector could run on this file, so the absence of findings means "
+            "nothing."]
+
     if spatial_shape is not None:
         report.fused_heatmap = fuse_heatmap(
             [e for e in evs if e.category == Category.MANIPULATION], spatial_shape)
     report.fused_segments = merge_segments(evs)
+    if child_segments:
+        report.fused_segments = sorted(report.fused_segments + child_segments,
+                                       key=lambda s: s.start)
     return report
 
 

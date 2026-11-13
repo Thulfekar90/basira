@@ -257,7 +257,8 @@ def detect_splice(x: np.ndarray, sr: int) -> Evidence:
     with np.errstate(invalid="ignore"):
         s_floor = np.minimum(np.abs(df) / FLOOR_SHIFT_DB, z_f / CHANGE_Z)
         s_shape = np.minimum(ds / SHAPE_SHIFT_DB, z_s / CHANGE_Z)
-    strength = np.nan_to_num(np.maximum(s_floor, s_shape), nan=0.0)
+    # fmax keeps whichever component is available; NaN only where both are missing.
+    strength = np.nan_to_num(np.fmax(s_floor, s_shape), nan=0.0)
     if measurable.sum() < 5:
         strength[:] = 0.0
     raw_change = float(strength.max()) if strength.size else 0.0

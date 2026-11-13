@@ -76,6 +76,29 @@ def lattice_peaks(spec_db: np.ndarray, period: int = 8):
     return out, excess
 
 
+def lattice_statistic(candidates: dict, excess: np.ndarray) -> float:
+    """Mean of the six strongest lattice peaks, in dB above an off-lattice null reference.
+
+    Null reference: the same 3x3-max statistic at random off-lattice frequencies. The
+    expected top-6 mean of that many null draws is about mean + 1.6 sd; only the part of
+    the lattice response above it counts (otherwise plain noise images look "periodic").
+    """
+    if not candidates:
+        return 0.0
+    n = excess.shape[0]
+    rs = np.random.RandomState(0)
+    ry, rx = rs.randint(2, n - 2, 3000), rs.randint(2, n - 2, 3000)
+    off = (ry % (n // 8) > 3) & (rx % (n // 8) > 3) & (np.hypot(ry - n // 2, rx - n // 2) > 8)
+    null = np.array([excess[y - 1:y + 2, x - 1:x + 2].max() for y, x in zip(ry[off], rx[off])])
+    null_ref = float(null.mean() + 1.6 * null.std()) if null.size > 50 else 0.0
+    return float(np.mean(sorted(candidates.values(), reverse=True)[:6]) - null_ref)
+
+
+def non_camera_peaks(peaks8: dict) -> dict:
+    """Lattice frequencies not explained by a Bayer CFA (which lives at +-N/2)."""
+    return {k: v for k, v in peaks8.items() if abs(k[0]) != 4 and abs(k[1]) != 4}
+
+
 def cfa_map(rgb: np.ndarray, block: int = 32):
     """Ratio of green-channel prediction error between the two quincunx lattices."""
     g = rgb[..., 1].astype(np.float32)
@@ -115,20 +138,9 @@ def analyze_spectral(d: ImageData) -> Evidence:
         candidates = {}   # JPEG blocking produces exactly this lattice — can't separate
     else:
         jpeg_strength = 0.0
-        candidates = {k: v for k, v in peaks8.items() if abs(k[0]) != 4 and abs(k[1]) != 4}
+        candidates = non_camera_peaks(peaks8)
     strong = {k: v for k, v in candidates.items() if v > PEAK_THRESHOLD}
-    # Null reference: the same 3x3-max statistic at random off-lattice frequencies. The
-    # expected top-6 mean of that many null draws is about mean + 1.6 sd; only the part of
-    # the lattice response above it counts (otherwise plain noise images look "periodic").
-    n_spec = excess.shape[0]
-    rs = np.random.RandomState(0)
-    ry, rx = rs.randint(2, n_spec - 2, 3000), rs.randint(2, n_spec - 2, 3000)
-    off = (ry % (n_spec // 8) > 3) & (rx % (n_spec // 8) > 3) & \
-        (np.hypot(ry - n_spec // 2, rx - n_spec // 2) > 8)
-    null = np.array([excess[y - 1:y + 2, x - 1:x + 2].max() for y, x in zip(ry[off], rx[off])])
-    null_ref = float(null.mean() + 1.6 * null.std()) if null.size > 50 else 0.0
-    stat = float(np.mean(sorted(candidates.values(), reverse=True)[:6]) - null_ref) \
-        if candidates else 0.0
+    stat = lattice_statistic(candidates, excess)
     # Off-lattice periodic spikes (any strong isolated peak), e.g. other upsampling factors.
     ex = excess.copy()
     c = ex.shape[0] // 2
@@ -183,10 +195,8 @@ def analyze_cfa(d: ImageData) -> Evidence:
     # spectrum shows non-camera lattice peaks, the CFA reading is not trustworthy.
     if not d.is_jpeg and min(d.rgb.shape[:2]) >= TILE:
         gray = cv2.cvtColor(d.rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
-        peaks, _ = lattice_peaks(residual_spectrum(gray), 8)
-        other = sorted((v for k, v in peaks.items() if abs(k[0]) != 4 and abs(k[1]) != 4),
-                       reverse=True)[:6]
-        if other and float(np.mean(other)) > SPEC_STAT_THRESHOLD:
+        peaks, excess = lattice_peaks(residual_spectrum(gray), 8)
+        if lattice_statistic(non_camera_peaks(peaks), excess) > SPEC_STAT_THRESHOLD:
             return Evidence.not_applicable(det, title, Category.MANIPULATION,
                                            "periodic generator-like artefacts mask the CFA pattern",
                                            **info)

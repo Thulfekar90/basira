@@ -51,8 +51,14 @@ class FrameScan:
     truncated: bool = False
     codec: str = ""
 
+    pts: Optional[np.ndarray] = None  # presentation time (s) of each analysed frame
+
     @property
     def t(self) -> np.ndarray:
+        """Presentation timestamps when the decoder reports them (correct for
+        variable-frame-rate footage), otherwise frame index / nominal fps."""
+        if self.pts is not None and len(self.pts) == len(self.idx):
+            return self.pts
         return self.idx / max(self.fps, 1e-6)
 
     @property
@@ -91,7 +97,7 @@ def scan_frames(path: str, max_frames: int = 3000, n_key: int = 5,
     span = min(n_total, max_decode) if n_total > 0 else max_decode
     stride = max(1, int(np.ceil(span / max_frames)))
     key_targets = set(np.linspace(0.12, 0.88, n_key) * max(span, 1) // 1)
-    idx, thumbs, noise, keys = [], [], [], []
+    idx, thumbs, noise, keys, pts = [], [], [], [], []
     i = 0
     while True:
         if not cap.grab():
@@ -107,6 +113,7 @@ def scan_frames(path: str, max_frames: int = 3000, n_key: int = 5,
                 thumbs.append(cv2.resize(gray, THUMB, interpolation=cv2.INTER_AREA).astype(np.float32))
                 noise.append(_noise_sigma(gray))
                 idx.append(i)
+                pts.append(cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0)
             if want_key:
                 keys.append((i, cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)))
         i += 1
@@ -129,7 +136,12 @@ def scan_frames(path: str, max_frames: int = 3000, n_key: int = 5,
         cap.release()
         if ok:
             keys.append((0, cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)))
+    pts_arr: Optional[np.ndarray] = np.asarray(pts, dtype=np.float64)
+    if len(pts_arr) < 2 or not np.all(np.isfinite(pts_arr)) or pts_arr[-1] <= 0 or \
+            np.any(np.diff(pts_arr) < 0):
+        pts_arr = None                      # decoder gave no usable timestamps
     return FrameScan(fps=fps, n_total=max(n_total, i), width=w, height=h, stride=stride,
+                     pts=pts_arr,
                      analysed_frames=i, truncated=truncated,
                      idx=np.asarray(idx), thumbs=T, diff=d, hist=hd, noise=np.asarray(noise),
                      keyframes=keys, codec=codec)

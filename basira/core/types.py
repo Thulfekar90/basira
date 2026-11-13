@@ -83,6 +83,10 @@ class Evidence:
     error: Optional[str] = None
 
     def __post_init__(self) -> None:
+        if not (np.isfinite(self.score) and np.isfinite(self.confidence)):
+            # A detector that returns NaN has failed; never let it poison the fusion.
+            self.error = self.error or "detector returned a non-finite score"
+            self.score, self.confidence = 0.0, 0.0
         self.score = float(np.clip(self.score, 0.0, 1.0))
         self.confidence = float(np.clip(self.confidence, 0.0, 1.0))
         if self.heatmap is not None:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -58,16 +59,8 @@ class ImageData:
 
 
 def _table_natural(tbl) -> np.ndarray:
-    """Pillow returns DQT tables in file (zig-zag) order in some versions and natural
-    order in others; detect which by comparing against the IJG shape."""
-    t = np.asarray(list(tbl), dtype=np.float64)
-    nat = np.empty(64)
-    nat[ZIGZAG] = t
-    # In natural order the table grows along rows *and* columns; zig-zag-read-as-natural
-    # breaks monotonic structure. Pick the interpretation that correlates better with IJG.
-    c_as_is = np.corrcoef(t, IJG_LUMA)[0, 1] if t.std() > 0 else 1
-    c_nat = np.corrcoef(nat, IJG_LUMA)[0, 1] if nat.std() > 0 else 1
-    return (nat if c_nat > c_as_is else t).reshape(8, 8)
+    """Pillow (>= 8.3) returns DQT tables already de-zigzagged, in natural order."""
+    return np.asarray(list(tbl), dtype=np.float64).reshape(8, 8)
 
 
 def estimate_quality(q8: np.ndarray):
@@ -79,12 +72,18 @@ def estimate_quality(q8: np.ndarray):
     return best, bool(best_err == 0)
 
 
-def load_image(path: str, max_pixels: int = 60_000_000) -> ImageData:
+def load_image(path: str, max_pixels: int = 60_000_000, max_bytes: int = 300 << 20) -> ImageData:
+    size = os.path.getsize(path)
+    if size > max_bytes:
+        raise ValueError(f"image file is {size >> 20} MB; the limit is {max_bytes >> 20} MB")
     with open(path, "rb") as f:
         raw = f.read()
-    Image.MAX_IMAGE_PIXELS = max_pixels
     notes: List[str] = []
-    im = Image.open(io.BytesIO(raw))
+    im = Image.open(io.BytesIO(raw))      # header only: nothing is decoded yet
+    if im.width * im.height > max_pixels:
+        raise ValueError(f"image is {im.width}x{im.height} "
+                         f"({im.width * im.height / 1e6:.0f} MP); the limit is "
+                         f"{max_pixels / 1e6:.0f} MP")
     fmt = im.format or "UNKNOWN"
     info = dict(im.info)
     exif, exif_sub = {}, {}
@@ -147,8 +146,11 @@ def load_image(path: str, max_pixels: int = 60_000_000) -> ImageData:
                 luma = np.asarray(imy, dtype=np.float64).copy()
         except Exception:
             luma = None
-        if luma is None:
-            luma = np.asarray(Image.fromarray(rgb).convert("YCbCr"), dtype=np.float64)[..., 0]
+        # CMYK / YCCK / RGB-coded JPEGs have no luma plane that matches table 0: leave
+        # ``luma_y`` empty so coefficient-domain detectors declare themselves not applicable
+        # instead of dividing by the wrong quantisers.
+        if luma is None and not notes:
+            notes.append(f"JPEG colour layout ({im.mode}) has no Y plane; DCT analysis skipped")
 
     return ImageData(path=path, raw=raw, format=fmt, rgb=rgb, pil_info=info, exif=exif,
                      exif_sub=exif_sub, quant=quant, quant_chroma=quant_c, luma_y=luma,

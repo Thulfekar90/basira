@@ -24,10 +24,23 @@ VIDEO_EXT = {".mp4", ".m4v", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".flv",
              ".3gp", ".mts", ".m2ts", ".ts", ".mpg", ".mpeg"}
 
 
+# Text formats that are *references* to other media (playlists, concat scripts, SDP).
+# FFmpeg would follow them, including to remote URLs — never hand them to a decoder.
+_REFERENCE_MAGIC = (b"#EXTM3U", b"ffconcat", b"[playlist]", b"v=0", b"<?xml", b"<smil",
+                    b"<asx", b"#!", b"file ", b"[Reference]", b"RTSPtext")
+# Decoders may only read local files.
+_FF_SAFE = ["-protocol_whitelist", "file,pipe"]
+os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "protocol_whitelist;file,pipe")
+
+
 def sniff(path: str) -> str:
     """Return "image", "audio" or "video" using magic bytes first, extension second."""
     with open(path, "rb") as f:
         head = f.read(64)
+    stripped = head.lstrip(b"\xef\xbb\xbf \t\r\n")
+    if any(stripped.lower().startswith(m.lower()) for m in _REFERENCE_MAGIC):
+        raise ValueError(f"Unsupported file: {os.path.basename(path)} is a playlist / "
+                         f"reference file, not media")
     if head[:3] == b"\xff\xd8\xff" or head[:8] == b"\x89PNG\r\n\x1a\n" or head[:2] == b"BM" \
             or head[:4] in (b"II*\x00", b"MM\x00*") or head[:6] in (b"GIF87a", b"GIF89a"):
         return "image"
@@ -78,8 +91,8 @@ def ffmpeg_probe_text(path: str) -> str:
     if not exe:
         return ""
     try:
-        r = subprocess.run([exe, "-hide_banner", "-i", path], capture_output=True,
-                           text=True, timeout=60)
+        r = subprocess.run([exe, "-hide_banner", "-nostdin", *_FF_SAFE, "-i", path],
+                           capture_output=True, text=True, timeout=60, errors="replace")
         return r.stderr
     except Exception:
         return ""
@@ -109,8 +122,8 @@ def _load_audio_ffmpeg(path: str, sr: Optional[int] = None, max_seconds: Optiona
 
     with tempfile.TemporaryDirectory() as td:
         out = os.path.join(td, "a.wav")
-        cmd = [exe, "-hide_banner", "-loglevel", "error", "-y", "-i", path, "-vn",
-               "-acodec", "pcm_f32le"]
+        cmd = [exe, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", *_FF_SAFE,
+               "-i", path, "-vn", "-acodec", "pcm_f32le"]
         if sr:
             cmd += ["-ar", str(sr)]
         if max_seconds:

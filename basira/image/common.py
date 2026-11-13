@@ -61,5 +61,5 @@ def working_gray(rgb: np.ndarray, max_side: int = 2048) -> Tuple[np.ndarray, flo
     h, w = g.shape
     s = min(1.0, max_side / max(h, w))
     if s < 1.0:
-        g = cv2.resize(g, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA)
+        g = cv2.resize(g, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA)
     return g, s

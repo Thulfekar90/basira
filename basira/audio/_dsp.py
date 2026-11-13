@@ -20,7 +20,15 @@ def to_mono(samples: np.ndarray) -> np.ndarray:
     if a.ndim == 2:
         if 0 < a.shape[0] < a.shape[1] and a.shape[0] <= 8:  # (ch, n) given by mistake
             a = a.T
-        a = a[:, 0] if a.shape[1] == 1 else a.mean(axis=1, dtype=np.float32)
+        if a.shape[1] == 1:
+            a = a[:, 0]
+        else:
+            mix = a.mean(axis=1, dtype=np.float32)
+            # Out-of-phase channels cancel in a mono mix ([x, -x] -> silence). If the mix
+            # lost most of the energy, analyse the loudest channel instead.
+            ch_rms = np.sqrt(np.mean(np.square(a, dtype=np.float64), axis=0))
+            mix_rms = float(np.sqrt(np.mean(np.square(mix, dtype=np.float64)))) if len(mix) else 0.0
+            a = mix if mix_rms >= 0.3 * float(ch_rms.max()) else a[:, int(np.argmax(ch_rms))]
     a = np.nan_to_num(a.reshape(-1), nan=0.0, posinf=0.0, neginf=0.0)
     return np.ascontiguousarray(a, dtype=np.float32)
 
