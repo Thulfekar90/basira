@@ -9,7 +9,7 @@ The repository is ready to push but has never been published. Whoever publishes 
 > account. Do not change any code or documentation other than what this brief lists.
 >
 > 1. Run `python -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/python -m pytest -q`.
->    All 75 tests must pass. If any fail, stop and report; do not publish.
+>    All 81 tests must pass. If any fail, stop and report; do not publish.
 > 2. Ask the owner for their GitHub username and whether the repository should be public.
 >    Check that the name `basira` is free on their account. If it is taken, ask for another
 >    name; do not pick one yourself.
@@ -31,8 +31,9 @@ The repository is ready to push but has never been published. Whoever publishes 
 - **Hero image.** The README's first image is a synthetic test scene. A real photograph the
   owner has the rights to (their own, or CC0), edited by hand and analysed with
   `basira scan`, makes a far stronger first impression. Add a screenshot of the HTML report.
-- **Public-dataset numbers.** Run `benchmarks/evaluate_folder.py` on at least one standard
-  set (CASIA v2, Columbia, IMD2020 for images; ASVspoof for audio) and publish the numbers,
-  good or bad. Forensics readers look for this first.
+- **More public-dataset numbers.** Columbia and CoMoFoD are in the README. Running
+  `benchmarks/evaluate_folder.py` on data the thresholds were *not* tuned on (CASIA v2,
+  IMD2020 for images; ASVspoof for audio) and publishing the result, good or bad, is the
+  most convincing thing still missing.
 - **Name.** Check that `basira` is free on PyPI before promising `pip install basira`.
 - **PyPI release** once the above is done: `python -m build && twine upload dist/*`.
