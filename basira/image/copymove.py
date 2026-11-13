@@ -126,9 +126,9 @@ def analyze_copymove(d: ImageData) -> Evidence:
     best_in = 0
     descs = []
     identities = []
+    accepted = []
     g = gray.astype(np.float32)
     for M, s_in, d_in in transforms:
-        best_in = max(best_in, len(s_in))
         warped = cv2.warpAffine(g, M, (w, h), flags=cv2.INTER_LINEAR,
                                 borderMode=cv2.BORDER_CONSTANT, borderValue=-1)
         valid = warped >= 0
@@ -157,24 +157,28 @@ def analyze_copymove(d: ImageData) -> Evidence:
             a_, b_ = na[dz] - na[dz].mean(), nb[dz] - nb[dz].mean()
             fine = float((a_ * b_).sum() / (np.sqrt((a_ * a_).sum() * (b_ * b_).sum()) + 1e-6))
         verified = float(tgt.sum()) / (h * w)
-        identities.append((len(s_in), fine, verified))
-        Minv = cv2.invertAffineTransform(M)
-        srcm = cv2.warpAffine(tgt, Minv, (w, h), flags=cv2.INTER_NEAREST)
-        mask_dst |= tgt
-        mask_src |= srcm
+        # Each transform is judged on its own: both conditions must hold - enough
+        # geometrically consistent matches, and matching fine detail. With many matches a
+        # lower detail correlation is accepted (re-compression rewrites the fine detail of
+        # a real clone); with few it is not. A look-alike pair elsewhere in the image, even
+        # one with more matches, must not hide a genuine clone.
+        n_in = len(s_in)
+        fine_thr = FINE_THRESHOLD_MANY if n_in >= MANY_INLIERS else FINE_THRESHOLD
+        t_score = min(calibrate(n_in, INLIER_THRESHOLD, INLIER_SOFTNESS),
+                      calibrate(fine, fine_thr, FINE_SOFTNESS))
+        identities.append((t_score, n_in, fine, verified))
         shift = M[:, 2]
-        descs.append({"inliers": len(s_in), "translation": [round(float(shift[0] / s), 1),
-                                                            round(float(shift[1] / s), 1)],
+        descs.append({"inliers": n_in, "fine_detail_corr": round(fine, 3),
+                      "score": round(t_score, 3),
+                      "translation": [round(float(shift[0] / s), 1), round(float(shift[1] / s), 1)],
                       "linear": np.round(M[:, :2], 3).tolist()})
+        if t_score >= 0.5:                       # only accepted clones are drawn
+            Minv = cv2.invertAffineTransform(M)
+            mask_dst |= tgt
+            mask_src |= cv2.warpAffine(tgt, Minv, (w, h), flags=cv2.INTER_NEAREST)
+            accepted.append((M, s_in, d_in))
     area = float((mask_src | mask_dst).mean())
-    best_identity = max(identities, key=lambda t: t[0])[1]
-    best_verified = max(identities, key=lambda t: t[0])[2]
-    # Two conditions must both hold: enough geometrically consistent matches, and matching
-    # fine detail. With many matches a lower detail correlation is accepted (re-compression
-    # rewrites the fine detail of a real clone); with few it is not.
-    fine_thr = FINE_THRESHOLD_MANY if best_in >= MANY_INLIERS else FINE_THRESHOLD
-    score = min(calibrate(best_in, INLIER_THRESHOLD, INLIER_SOFTNESS),
-                calibrate(best_identity, fine_thr, FINE_SOFTNESS))
+    score, best_in, best_identity, best_verified = max(identities, key=lambda t: (t[0], t[1]))
     heat_small = np.maximum(mask_dst.astype(np.float32), 0.6 * mask_src.astype(np.float32))
     heat = cv2.resize(heat_small, (W, H), interpolation=cv2.INTER_LINEAR)
     heat = cv2.GaussianBlur(heat, (0, 0), 2)
@@ -188,14 +192,14 @@ def analyze_copymove(d: ImageData) -> Evidence:
     vis = rgb.copy()
     if s < 1:
         vis = cv2.resize(vis, (w, h), interpolation=cv2.INTER_AREA)
-    for M, s_in, d_in in transforms[:3]:
+    for M, s_in, d_in in (accepted or transforms)[:3]:
         for a, b in zip(s_in[:150], d_in[:150]):
             cv2.line(vis, tuple(map(int, a)), tuple(map(int, b)), (0, 255, 120), 1, cv2.LINE_AA)
             cv2.circle(vis, tuple(map(int, a)), 2, (255, 220, 0), -1)
             cv2.circle(vis, tuple(map(int, b)), 2, (255, 60, 60), -1)
     return Evidence(
         detector=det, title=title, category=Category.MANIPULATION, score=score, confidence=0.8,
-        summary=(f"Found {len(transforms)} cloned region pair(s); the strongest is supported by "
+        summary=(f"Found {len(accepted)} cloned region pair(s); the strongest is supported by "
                  f"{best_in} geometrically consistent keypoint matches whose fine detail "
                  f"(noise, micro-texture) also matches (correlation {best_identity:.2f}); the "
                  f"pair covers {area * 100:.2f}% of the image." if score >= 0.5 else

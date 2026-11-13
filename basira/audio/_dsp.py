@@ -31,10 +31,15 @@ def to_mono(samples: np.ndarray) -> np.ndarray:
             ch_rms = np.sqrt(np.mean(np.square(a, dtype=np.float64), axis=0))
             lead = a[:, int(np.argmax(ch_rms))]
             blk = 2048
-            nb = len(mix) // blk
-            if nb >= 1:
-                e_mix = np.square(mix[: nb * blk].astype(np.float64)).reshape(nb, blk).mean(axis=1)
-                e_ch = np.square(lead[: nb * blk].astype(np.float64)).reshape(nb, blk).mean(axis=1)
+            n = len(mix)
+            if n:
+                nb = -(-n // blk)                              # ceil: last block may be partial
+                pad = nb * blk - n
+                sq_mix = np.pad(np.square(mix.astype(np.float64)), (0, pad)).reshape(nb, blk)
+                sq_ch = np.pad(np.square(lead.astype(np.float64)), (0, pad)).reshape(nb, blk)
+                count = np.full(nb, blk, dtype=np.float64)
+                count[-1] = blk - pad
+                e_mix, e_ch = sq_mix.sum(axis=1) / count, sq_ch.sum(axis=1) / count
                 audible = e_ch > max(1e-9, 1e-4 * float(e_ch.max()))
                 cancelled = audible & (e_mix < 0.09 * e_ch)
                 a = lead if cancelled.any() else mix   # one channel is always a valid choice

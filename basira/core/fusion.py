@@ -140,8 +140,9 @@ def finalize(report: Report, spatial_shape=None) -> Report:
         return e.error is None and e.confidence > 0 and e.category == Category.MANIPULATION
 
     failed = [e for e in evs if e.error]
-    child_failed = [c for c in report.children if c.info.get("detectors_failed") and
-                    not any(ran_ok(e) for e in c.evidences)]
+    child_failed = [c for c in report.children
+                    if c.info.get("detectors_failed") or c.info.get("children_failed")]
+    report.info["children_failed"] = len(child_failed)
     content_ok = any(ran_ok(e) for e in evs)
     report.info["detectors_failed"] = len(failed)
     if report.verdict_level == 0 and (failed or child_failed):
@@ -154,7 +155,7 @@ def finalize(report: Report, spatial_shape=None) -> Report:
             report.verdict = "Inconclusive (part of the analysis failed)"
             tail = "The remaining detectors found nothing, but the analysis is incomplete."
         report.explanation = [f"[{e.title}] {e.summary}" for e in failed[:4]] + \
-            [f"[{c.media_type} track] could not be analysed" for c in child_failed] + [tail]
+            [f"[{c.media_type} track] part of its analysis failed" for c in child_failed] + [tail]
 
     if spatial_shape is not None:
         report.fused_heatmap = fuse_heatmap(

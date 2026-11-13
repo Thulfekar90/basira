@@ -78,16 +78,24 @@ def _valid_generator_payload(key: str, txt: str) -> bool:
         js = json.loads(t)
     except Exception:
         return False
+    gen_node = re.compile(r"Sampler|CLIPTextEncode|CheckpointLoader|UNETLoader|VAEDecode|"
+                          r"EmptyLatent|LoraLoader|ControlNet|SaveImage", re.I)
     if key == "prompt":                # ComfyUI API graph: {"3": {"class_type": ..., "inputs": ...}}
-        return isinstance(js, dict) and len(js) > 0 and all(
-            isinstance(v, dict) and "class_type" in v for v in js.values())
-    if key == "workflow":              # ComfyUI editor graph
-        return isinstance(js, dict) and isinstance(js.get("nodes"), list)
+        return (isinstance(js, dict) and len(js) > 0 and
+                all(isinstance(v, dict) and "class_type" in v for v in js.values()) and
+                any(gen_node.search(str(v.get("class_type", ""))) for v in js.values()))
+    if key == "workflow":              # ComfyUI editor graph: {"nodes": [{"type": ...}, ...]}
+        nodes = js.get("nodes") if isinstance(js, dict) else None
+        return (isinstance(nodes, list) and len(nodes) > 0 and
+                all(isinstance(n, dict) for n in nodes) and
+                any(gen_node.search(str(n.get("type", ""))) for n in nodes))
     if key in ("invokeai_metadata", "sd-metadata"):
-        return isinstance(js, dict) and bool(
-            {"model", "generation_mode", "positive_prompt", "image", "app_id", "seed"} & set(js))
+        keys = {"model", "generation_mode", "positive_prompt", "image", "app_id", "seed",
+                "steps", "cfg_scale", "scheduler"}
+        return isinstance(js, dict) and len(keys & {k for k, v in js.items() if v not in (None, "", [], {})}) >= 2
     if key == "generation_data":
-        return isinstance(js, dict) and bool({"prompt", "models", "seed", "steps"} & set(js))
+        keys = {"prompt", "models", "seed", "steps", "baseModel", "sampler"}
+        return isinstance(js, dict) and len(keys & {k for k, v in js.items() if v not in (None, "", [], {})}) >= 2
     return False
 
 

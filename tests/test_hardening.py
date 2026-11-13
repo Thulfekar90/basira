@@ -198,3 +198,64 @@ def test_opencv_protocol_whitelist_survives_existing_options(monkeypatch):
     v = os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"]
     assert "rtsp_transport;tcp" in v and v.endswith("protocol_whitelist;file,pipe")
     assert "http" not in v
+
+
+# ---- third review round --------------------------------------------------------------
+def test_empty_workflow_chunk_is_not_proof(tmp_path):
+    meta = PngInfo()
+    meta.add_text("workflow", '{"nodes": []}')
+    meta.add_text("invokeai_metadata", '{"model": null}')
+    p = str(tmp_path / "empty_wf.png")
+    Image.fromarray(S.camera_photo(2, 384, 512)).save(p, pnginfo=meta)
+    assert basira.analyze(p).verdict_level < 4
+
+
+def test_partial_child_failure_keeps_parent_from_looking_clean():
+    quiet = Evidence("audio.silence", "Silence", Category.MANIPULATION, 0.02, 0.9, "ok")
+    broken = Evidence.failed("audio.enf", "ENF", Category.MANIPULATION, RuntimeError("y"))
+    child = finalize(Report(path="x", media_type="audio", info={}, evidences=[quiet, broken]))
+    parent_ev = Evidence("video.jump", "Jumps", Category.MANIPULATION, 0.03, 0.6, "ok")
+    r = finalize(Report(path="x", media_type="video", info={}, evidences=[parent_ev],
+                        children=[child]))
+    assert child.verdict_level == 1 and r.verdict_level == 1
+    assert "failed" in r.verdict
+
+
+@pytest.mark.parametrize("n,start", [(17408, 16384), (1024, 0)])
+def test_stereo_cancellation_in_tail_and_short_inputs(n, start):
+    from basira.audio._dsp import to_mono
+
+    left = np.full(n, 0.1, np.float32)
+    right = left.copy()
+    right[start:] *= -1
+    assert float(np.abs(to_mono(np.stack([left, right], axis=1))[start:]).mean()) > 0.05
+
+
+def test_lookalike_pair_does_not_hide_a_real_clone(tmp_path):
+    """Two independently noisy copies of one texture (many matches, different fine detail)
+    next to an exact clone: the clone must still be reported."""
+    import cv2
+
+    from basira.image.copymove import analyze_copymove
+    from basira.image.load import from_array
+
+    rs = np.random.RandomState(3)
+    img = S.scene(768, 640, 4).astype(np.float32)
+    tex = cv2.GaussianBlur(rs.rand(256, 256).astype(np.float32) * 255, (0, 0), 3)
+    tex = (tex - tex.mean()) * 6 + 128
+    img[20:276, 20:276] = tex[..., None] + rs.randn(256, 256, 3) * 6
+    img[20:276, 340:596] = tex[..., None] + rs.randn(256, 256, 3) * 6
+    img = np.clip(img + rs.randn(*img.shape) * 2, 0, 255).astype(np.uint8)
+    img[600:728, 400:528] = img[330:458, 60:188]            # the exact clone
+    e = analyze_copymove(from_array(img))
+    assert e.score > 0.5, e.details["transforms"]
+    assert e.heatmap[620:700, 420:500].mean() > 0.5
+
+
+def test_analysed_seconds_covers_key_frames():
+    from basira.video.temporal import FrameScan
+
+    fs = FrameScan(fps=25, n_total=6, width=4, height=4, stride=3, idx=np.array([0, 3]),
+                   thumbs=np.zeros((2, 2, 2), np.float32), diff=np.zeros(2), hist=np.zeros(2),
+                   noise=np.zeros(2), pts=np.array([0.0, 0.12]), key_pts={5: 4.0})
+    assert fs.time_of(5) == 4.0 and fs.analysed_seconds == 4.0

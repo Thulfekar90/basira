@@ -65,7 +65,7 @@ class FrameScan:
     @property
     def analysed_seconds(self) -> float:
         if self.pts is not None and len(self.pts):
-            return float(self.pts[-1])
+            return float(max([self.pts[-1]] + list(self.key_pts.values())))
         return self.analysed_frames / max(self.fps, 1e-6)
 
     @property
@@ -151,7 +151,8 @@ def scan_frames(path: str, max_frames: int = 3000, n_key: int = 5,
     hd = np.zeros(len(T), np.float32)
     hd[1:] = 0.5 * np.abs(hs[1:] - hs[:-1]).sum(axis=1)
     if not keys:
-        cap = cv2.VideoCapture(path)
+        _enforce_opencv_whitelist()
+        cap = cv2.VideoCapture(path, cv2.CAP_FFMPEG)
         ok, bgr = cap.read()
         cap.release()
         if ok:
