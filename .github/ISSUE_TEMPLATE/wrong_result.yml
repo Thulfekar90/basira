@@ -1,0 +1,60 @@
+name: False positive / false negative
+description: A file you know is untouched was flagged, or an edit you know is there was missed.
+labels: ["wrong-result"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you - a wrong result with the file attached is the most useful report there is.
+        Before a **false negative** report, please read the README's "Limitations": an edit that was
+        re-compressed, resized or sent through a messenger afterwards is usually an expected miss.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of wrong result?
+      options:
+        - "False positive: an unedited file was flagged (verdict level 2 or higher)"
+        - "False negative: an edited or generated file came back clean"
+        - "Right verdict, wrong place: the highlighted region or time range is not where the edit is"
+    validations:
+      required: true
+  - type: checkboxes
+    id: attached
+    attributes:
+      label: What is attached
+      description: Tick what you were able to include. The more of these, the more likely it can be fixed.
+      options:
+        - label: "The file exactly as it was analysed, zipped (not a screenshot, not re-saved, not re-uploaded: those destroy the traces in question)"
+        - label: "`report.json` from `basira scan FILE --json --no-html > report.json`"
+        - label: "The output of `basira doctor`"
+        - label: "For a false negative: a mask image, box or time range showing what was changed"
+        - label: "I have the right to share this file, and it does not identify a private person"
+  - type: textarea
+    id: history
+    attributes:
+      label: What is known about the file's history
+      description: >
+        Camera or generator; editing software and what was done with it; every app, site or messenger it
+        passed through; whether it was resized or re-saved.
+    validations:
+      required: true
+  - type: textarea
+    id: truth
+    attributes:
+      label: How do you know what the right answer is?
+      description: >
+        For a false positive: why you are confident it is unedited (e.g. "I took it; this is the camera's
+        own file"). For a false negative: who made the edit and how.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Terminal output of `basira scan FILE`
+      render: console
+    validations:
+      required: true
+  - type: input
+    id: cannot_share
+    attributes:
+      label: If the file cannot be attached, why not - and can you describe how to make a similar one?

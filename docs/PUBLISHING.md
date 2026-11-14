@@ -9,7 +9,7 @@ The repository is ready to push but has never been published. Whoever publishes 
 > account. Do not change any code or documentation other than what this brief lists.
 >
 > 1. Run `python -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/python -m pytest -q`.
->    All 81 tests must pass. If any fail, stop and report; do not publish.
+>    The whole test suite (`.venv/bin/python -m pytest -q`) must pass. If any fail, stop and report; do not publish.
 > 2. Ask the owner for their GitHub username and whether the repository should be public.
 >    Check that the name `basira` is free on their account. If it is taken, ask for another
 >    name; do not pick one yourself.
@@ -21,7 +21,7 @@ The repository is ready to push but has never been published. Whoever publishes 
 >    `deepfake-detection`, `tamper-detection`, `c2pa`, `copy-move`, `python`.
 > 5. Push the `main` branch (rename the local branch to `main` if it is `master`). Never
 >    force-push. Do not push `.venv/`, `examples/out/` or any file not tracked by git.
-> 6. Confirm the GitHub Actions run for the push is green on all four matrix jobs. If it is
+> 6. Confirm the GitHub Actions run for the push is green on every required job (the Windows job is experimental and may fail). If it is
 >    not, report the failing job and log; do not disable the workflow.
 > 7. Report the repository URL and the CI status. Do not create a release, a PyPI upload,
 >    or any social-media post: those are the owner's decisions.

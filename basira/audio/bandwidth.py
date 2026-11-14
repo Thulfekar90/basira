@@ -56,7 +56,9 @@ SHIFT_THRESHOLD_OCT = 0.35
 SHIFT_SOFTNESS_OCT = 0.1
 SHIFT_MIN_WINDOWS = 2
 SHIFT_MAX_FRACTION = 0.45    # deviating windows must be a minority
-SHIFT_CONFIDENCE = 0.6
+SHIFT_CONFIDENCE = 0.4       # below the 0.45 "Suspicious" level on purpose: produced audio
+                             # changes bandwidth by design (3 of 60 macOS ring tones were
+                             # flagged at 0.6), so this cue has to be confirmed by another
 LOSSY_SHIFT_THRESHOLD_OCT = 0.8   # lossy codecs drop HF bands frame by frame
 LOSSY_SHIFT_CONFIDENCE = 0.25
 WIDER_DB = 20.0              # stop-band content needed to call a window "wider"
@@ -208,7 +210,9 @@ def detect_bandwidth_shift(x: np.ndarray, sr: int, *, lossy: bool = False,
                    f"low-pass edge (largest deviation {raw:.2f} octaves, threshold "
                    f"{thr:.2f}); typical edge {ref / 1000:.1f} kHz. Material "
                    f"from a different recording / processing chain appears to be spliced in at "
-                   + ", ".join(f"{s.start:.1f}-{s.end:.1f} s" for s in segments[:4]) + ".")
+                   + ", ".join(f"{s.start:.1f}-{s.end:.1f} s" for s in segments[:4])
+                   + ". Music and sound design also change bandwidth when instruments enter or "
+                     "leave, so this cue alone does not make a file suspicious.")
     elif frac_bad > SHIFT_MAX_FRACTION:
         summary = (f"Bandwidth varies throughout the file ({frac_bad:.0%} of windows deviate), "
                    f"so no single passage stands out; not scored.")

@@ -16,6 +16,7 @@ Design rules
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -97,20 +98,25 @@ class Evidence:
         return self.score * self.confidence
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        """JSON-ready dict (documented in docs/JSON.md). Strictly serialisable: no NaN,
+        no Infinity, no numpy types."""
+        score = round(float(self.score), 4)
+        if self.score < 0.5 <= score:
+            score = 0.4999        # rounding must not carry a quiet detector over its threshold
+        return _jsonable({
             "detector": self.detector,
             "title": self.title,
-            "category": self.category.value,
-            "score": round(self.score, 4),
-            "confidence": round(self.confidence, 4),
+            "category": getattr(self.category, "value", self.category),
+            "score": score,
+            "confidence": round(float(self.confidence), 4),
             "summary": self.summary,
-            "decisive": self.decisive,
-            "details": _jsonable(self.details),
+            "decisive": bool(self.decisive),
+            "details": self.details,
             "segments": [s.to_dict() for s in self.segments],
             "regions": [r.to_dict() for r in self.regions],
             "has_heatmap": self.heatmap is not None,
             "error": self.error,
-        }
+        })
 
     @classmethod
     def failed(cls, detector: str, title: str, category: Category, err: Exception) -> "Evidence":
@@ -148,41 +154,75 @@ class Report:
         return None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        """JSON-ready dict: the stable machine-readable output (documented field by field
+        in docs/JSON.md). ``json.dumps(report.to_dict(), allow_nan=False)`` always works."""
+        info = dict(self.info)
+        # Always present, so a consumer can tell "nothing found" from "part of it crashed".
+        info.setdefault("detectors_failed", sum(1 for e in self.evidences if e.error))
+        info.setdefault("children_failed", sum(
+            1 for c in self.children
+            if c.info.get("detectors_failed") or c.info.get("children_failed")))
+        return _jsonable({
             "tool": "basira",
+            "schema_version": SCHEMA_VERSION,
             "version": self.version,
             "path": self.path,
             "media_type": self.media_type,
-            "info": _jsonable(self.info),
+            "info": info,
             "verdict": self.verdict,
-            "verdict_level": self.verdict_level,
-            "scores": {k: round(v, 4) for k, v in self.scores.items()},
-            "explanation": self.explanation,
+            "verdict_level": int(self.verdict_level),
+            "scores": {k: round(float(v), 4) for k, v in self.scores.items()},
+            "explanation": list(self.explanation),
             "segments": [s.to_dict() for s in self.fused_segments],
             "evidences": [e.to_dict() for e in self.evidences],
             "children": [c.to_dict() for c in self.children],
-            "elapsed_sec": round(self.elapsed, 3),
-        }
+            "elapsed_sec": round(float(self.elapsed), 3),
+        })
+
+
+# Version of the JSON layout produced by ``Report.to_dict``. It changes only when a
+# documented field is removed, renamed or changes type (see docs/JSON.md).
+SCHEMA_VERSION = 1
 
 
 def _jsonable(obj: Any) -> Any:
-    """Recursively convert numpy / exotic types into JSON-serialisable values."""
+    """Recursively convert numpy / exotic types into strict JSON values.
+
+    The result contains only dict (with str keys), list, str, int, float, bool and None,
+    and every float is finite: NaN and +-Infinity become ``None`` because they are not
+    valid JSON. Unknown objects are converted with ``str`` rather than raising."""
+    if isinstance(obj, Enum):                # before str: Category is a str subclass
+        return _jsonable(obj.value)
+    if obj is None or isinstance(obj, bool):
+        return obj
+    if isinstance(obj, str):
+        return str(obj)
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, (int, np.integer)):
+        return int(obj)
+    if isinstance(obj, (float, np.floating)):
+        v = float(obj)
+        return round(v, 6) if math.isfinite(v) else None
     if isinstance(obj, dict):
         return {str(k): _jsonable(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_jsonable(v) for v in obj]
+    if isinstance(obj, (set, frozenset)):
+        return [_jsonable(v) for v in sorted(obj, key=repr)]
     if isinstance(obj, np.ndarray):
-        return obj.tolist() if obj.size <= 256 else f"<array {obj.shape}>"
-    if isinstance(obj, (np.floating,)):
-        return round(float(obj), 6)
-    if isinstance(obj, (np.integer,)):
-        return int(obj)
-    if isinstance(obj, (np.bool_,)):
-        return bool(obj)
-    if isinstance(obj, float):
-        return round(obj, 6)
-    if isinstance(obj, bytes):
-        return obj[:64].decode("latin-1", "replace")
-    if isinstance(obj, Enum):
-        return obj.value
-    return obj
+        return _jsonable(obj.tolist()) if obj.size <= 256 else f"<array {obj.shape}>"
+    if isinstance(obj, (bytes, bytearray)):
+        return bytes(obj[:64]).decode("latin-1", "replace")
+    if isinstance(obj, np.generic):          # np.str_, np.bytes_, np.datetime64, complex ...
+        try:
+            return _jsonable(obj.item())
+        except Exception:
+            return str(obj)
+    if isinstance(obj, complex):
+        return str(obj)
+    try:                                     # Fraction, Decimal, PIL IFDRational, ...
+        v = float(obj)
+        return round(v, 6) if math.isfinite(v) else None
+    except Exception:
+        return str(obj)

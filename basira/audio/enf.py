@@ -13,7 +13,10 @@ Method
 ------
 1. Decimate to 1 kHz; measure narrow-band SNR of the 50, 100, 60 and 120 Hz
    lines (peak within +-0.15 Hz * k versus the median of 1..4 Hz * k away).
-   Below ``HUM_SNR_MIN_DB`` -> not applicable.
+   Below ``HUM_SNR_MIN_DB`` -> not applicable. The line must also lie within
+   ``HUM_MAX_OFFSET_HZ`` of the mains frequency and keep a steady level
+   (``HUM_STEADY_DB``); otherwise it is a bass note or a machine, and the
+   detector declines (music otherwise produces "phase jumps" at every note).
 2. Narrow Butterworth band-pass (``BW_HZ * k`` wide) around the measured hum
    line, Hilbert analytic signal, instantaneous phase minus the nominal
    carrier -> slowly varying phase residual.
@@ -21,19 +24,24 @@ Method
    ``DROPOUT_MIN_S`` or longer (material recorded without hum was spliced in,
    or the hum was filtered locally). Phase / frequency statistics are masked
    inside dropouts, where they are meaningless.
-4. Phase discontinuity statistic: at every instant, fit a line to the phase
-   residual on each side (``FIT_S`` long, ``GUARD_S`` away to skip the filter
-   transient) and compare both extrapolations at that instant. Smooth ENF
-   drift is linear on that scale; a cut leaves a step. The statistic is
-   wrapped to (-pi, pi]. Threshold: ``max(PHASE_JUMP_MIN_RAD, PHASE_Z *
-   robust sigma)``.
+4. Phase discontinuity statistic: at every instant one least-squares fit of
+   ``line + step`` to the phase residual over ``+-FIT_S`` (leaving out
+   ``+-GUARD_S``, the filter transient). Smooth ENF drift is linear on that
+   scale; a cut leaves a step. The statistic is wrapped to (-pi, pi].
+   Threshold: ``max(PHASE_JUMP_MIN_RAD, PHASE_Z * robust sigma)``. The sigma
+   is this file's own: speech and rumble around the hum line make the phase
+   wander, and the threshold rises with it -- the summary states which
+   fraction of random cuts could still be seen.
 5. ENF frequency track: zoom-DFT peak (parabolic interpolation) of 2 s
    frames every 0.25 s; a step in the median frequency before / after an
    instant beyond ``max(FREQ_STEP_MIN_HZ, FREQ_Z * sigma)`` is also flagged.
 
 Limitations: a cut of an exact whole number of hum cycles leaves no phase
 step; hum that is too weak, absent or added digitally after editing defeats the
-test; compressed codecs may remove hum below their high-pass.
+test; compressed codecs may remove hum below their high-pass. Measured on
+simulated room recordings of text-to-speech with weak hum
+(benchmarks/audio_robustness.py; hum 28-40 dB below the speech): 34 of 72
+random cuts were located, none of 44 clean recordings flagged. Recordings without hum (battery devices) give nothing.
 """
 from __future__ import annotations
 
@@ -55,16 +63,25 @@ MIN_SECONDS = 6.0
 HUM_SNR_MIN_DB = 10.0        # narrow-band peak over local background
 BW_HZ = 1.0                  # band-pass width at the fundamental (x k for harmonic k)
 PHASE_RATE = 100             # phase residual decimated to 100 Hz
-FIT_S = 1.5                  # linear-fit length on each side
-GUARD_S = 0.6                # gap between the two fits (filter transient)
+FIT_S = 2.5                  # joint line + step fit reaches this far on each side
+GUARD_S = 0.6                # ... leaving out +-this around the instant (filter transient)
 PHASE_JUMP_MIN_RAD = 0.5     # absolute floor for a phase discontinuity
-PHASE_Z = 6.0                # robust z for a phase discontinuity
+PHASE_Z = 6.0                # robust z for a phase discontinuity (largest value in 44
+                             # clean simulated recordings with hum: 4.9)
+PHASE_SOFTNESS = 0.15        # score reaches ~0.75 at 1.15 x threshold (about 7 sigma), which
+                             # is where this detector alone makes a file "Suspicious"
 FREQ_STEP_MIN_HZ = 0.015     # absolute floor for a frequency step (fundamental Hz)
 FREQ_Z = 7.0
 EVENT_MIN_GAP_S = 1.0
+# What counts as mains hum (and not a bass note or a machine). Measured with
+# benchmarks/audio_robustness.py: simulated hum, with interference from speech and AGC,
+# keeps its envelope within 3.5 dB (90th vs 60th percentile); held notes in the macOS ring
+# tones and slideshow music that passed the SNR test spread 4-16 dB or sit 0.12-0.23 Hz off.
+HUM_MAX_OFFSET_HZ = 0.12     # line must be this close to 50 / 60 Hz (x harmonic)
+HUM_STEADY_DB = 5.0          # envelope spread (90th - 60th percentile) of a steady hum
 RESID_FACTOR = 4.0           # a fit window whose residual exceeds this x median
 RESID_MIN_RAD = 0.15         # ...(and this absolute value) straddles a discontinuity
-SIDELOBE_S = FIT_S + GUARD_S + 0.9   # a strong jump contaminates fits this far away
+SIDELOBE_S = FIT_S + 0.9     # a strong jump contaminates fits this far away
 SIDELOBE_RATIO = 0.6         # ...so weaker events closer than that are suppressed
 EDGE_S = 2.5                 # ignore file edges (filter transients)
 DROPOUT_DB = 10.0            # hum level drop (vs file median) that counts as a dropout
@@ -110,44 +127,43 @@ def hum_snr(y: np.ndarray, fs: int = FS) -> List[Dict[str, float]]:
     return sorted(out, key=lambda d: -d["snr_db"])
 
 
-def _line_fits(p: np.ndarray, w: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """For every window start s: LS line through p[s:s+w] -> (value at u=0, slope, rms resid)."""
-    u = np.arange(w, dtype=np.float64)
-    su, suu = u.sum(), (u * u).sum()
-    ones = np.ones(w)
-    sy = np.convolve(p, ones, "valid")
-    suy = np.convolve(p, u[::-1], "valid")
-    syy = np.convolve(p * p, ones, "valid")
-    slope = (w * suy - su * sy) / (w * suu - su * su)
-    icpt = (sy - slope * su) / w
-    rss = syy - icpt * sy - slope * suy
-    return icpt, slope, np.sqrt(np.maximum(rss, 0.0) / w)
-
-
 def phase_discontinuity(ph: np.ndarray, rate: int) -> Tuple[np.ndarray, np.ndarray]:
-    """Wrapped jump (rad) at each sample, and the worse of the two fit residuals.
+    """Least-squares phase step (wrapped, rad) at each instant, and the fit's rms residual.
 
-    nan where the windows do not fit. A window that straddles a discontinuity
-    has a large residual, which is how side lobes of a real jump are rejected.
+    Model on ``[-FIT_S, +FIT_S]`` around the instant, leaving out ``+-GUARD_S`` (the
+    band-pass smears a step over that): ``phase = a + b * u + step * sign(u) / 2``.
+    One common slope for both sides -- the mains frequency does not change across a
+    cut -- so nothing is extrapolated. nan where the window does not fit. The residual
+    is large where a discontinuity lies *inside* one side of the window, which is how
+    side lobes of a real jump (and 2*pi unwrapping slips) are rejected.
     """
     w, g = int(FIT_S * rate), int(GUARD_S * rate)
-    # remove the global linear trend first (keeps the sums well conditioned)
-    tt = np.arange(len(ph), dtype=np.float64)
-    ph = ph - np.polyval(np.polyfit(tt, ph, 1), tt) if len(ph) > 2 else ph
-    icpt, slope, rms = _line_fits(ph, w)
     n = len(ph)
-    jump = np.full(n, np.nan)
+    step = np.full(n, np.nan)
     resid = np.full(n, np.nan)
-    i = np.arange(w + g, n - w - g)
-    if i.size == 0:
-        return jump, resid
-    sl, sr_ = i - g - w, i + g
-    left = icpt[sl] + slope[sl] * (w + g)         # left fit extrapolated forward to i
-    right = icpt[sr_] + slope[sr_] * (-g)         # right fit extrapolated back to i
-    d = right - left
-    jump[i] = (d + np.pi) % (2 * np.pi) - np.pi
-    resid[i] = np.maximum(rms[sl], rms[sr_])
-    return jump, resid
+    if n < 2 * w + 1 or w <= g + 2:
+        return step, resid
+    tt = np.arange(n, dtype=np.float64)
+    ph = ph - np.polyval(np.polyfit(tt, ph, 1), tt)
+    u = np.arange(-w, w + 1, dtype=np.float64)
+    m = (np.abs(u) > g).astype(np.float64)
+    h = 0.5 * np.sign(u) * m
+    um = u * m
+    cnt, suu, suh, shh = m.sum(), float(um @ u), float(um @ h), float(h @ h)
+    det = suu * shh - suh * suh
+    # correlation with a kernel k: sum_u k[u] * ph[t + u]  ==  convolve(ph, k[::-1], "valid")
+    sy = np.convolve(ph, m[::-1], "valid")
+    suy = np.convolve(ph, um[::-1], "valid")
+    shy = np.convolve(ph, h[::-1], "valid")
+    syy = np.convolve(ph * ph, m[::-1], "valid")
+    b = (shh * suy - suh * shy) / det
+    d = (suu * shy - suh * suy) / det
+    a = sy / cnt
+    rss = syy - a * sy - b * suy - d * shy
+    i = np.arange(w, n - w)
+    step[i] = (d + np.pi) % (2 * np.pi) - np.pi
+    resid[i] = np.sqrt(np.maximum(rss, 0.0) / cnt)
+    return step, resid
 
 
 def freq_track(yb: np.ndarray, fs: int, fh: float, k: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -210,6 +226,12 @@ def detect_enf(x: np.ndarray, sr: int) -> Evidence:
     if best["harmonic"] == 2 and fund and fund[0]["snr_db"] >= best["snr_db"] - 3:
         best = fund[0]
     k, fh, nominal = int(best["harmonic"]), float(best["freq"]), best["nominal"]
+    if abs(fh / k - nominal) > HUM_MAX_OFFSET_HZ:
+        return Evidence.not_applicable(
+            DETECTOR, TITLE, Category.MANIPULATION,
+            f"the tone at {fh:.2f} Hz is {abs(fh / k - nominal):.2f} Hz away from the mains "
+            f"frequency (limit {HUM_MAX_OFFSET_HZ:.2f} Hz): more likely a note or a machine "
+            f"than grid hum", hum_lines=lines)
 
     bw = BW_HZ * k
     sos = butter(2, [fh - bw / 2, fh + bw / 2], btype="band", fs=FS, output="sos")
@@ -228,6 +250,14 @@ def detect_enf(x: np.ndarray, sr: int) -> Evidence:
     amp_db = 20 * np.log10(uniform_filter1d(amp, size=int(0.3 * PHASE_RATE), mode="nearest") + 1e-12)
     inner = (td >= 1.0) & (td <= dur - 1.0)
     ref_db = float(np.median(amp_db[inner])) if inner.any() else float(np.median(amp_db))
+    spread = float(np.subtract(*np.percentile(amp_db[inner], [90, 60]))) if inner.any() else 0.0
+    if spread > HUM_STEADY_DB:
+        return Evidence.not_applicable(
+            DETECTOR, TITLE, Category.MANIPULATION,
+            f"the {fh:.1f} Hz component is not steady (its level spreads {spread:.1f} dB, "
+            f"limit {HUM_STEADY_DB:.0f} dB): a bass note, a machine or hum present in only a "
+            f"small part of the file, not continuous mains hum", hum_lines=lines,
+            hum_level_spread_db=spread)
     low = (amp_db < ref_db - DROPOUT_DB) & inner
     st, en = runs(low)
     keep = (en - st) >= int(DROPOUT_MIN_S * PHASE_RATE)
@@ -245,7 +275,7 @@ def detect_enf(x: np.ndarray, sr: int) -> Evidence:
     drop_depth = [float(ref_db - np.median(amp_db[a_:b_])) for a_, b_ in zip(st, en)]
     raw_d = max(drop_depth) if drop_depth else 0.0
     # mask phase / frequency statistics where any fit window touches a dropout
-    reach = FIT_S + GUARD_S + 0.5
+    reach = FIT_S + 0.5
     bad = np.zeros(len(td), bool)
     for a_, b_ in zip(st, en):
         bad |= (td >= td[a_] - reach) & (td <= td[min(b_, len(td) - 1)] + reach)
@@ -255,9 +285,14 @@ def detect_enf(x: np.ndarray, sr: int) -> Evidence:
     if valid.sum() < PHASE_RATE:
         return Evidence.not_applicable(DETECTOR, TITLE, Category.MANIPULATION,
                                        "recording too short after edge trimming")
-    sigma = 1.4826 * np.median(np.abs(jump[valid] - np.median(jump[valid]))) + 1e-6
     rms_ref = float(np.median(fit_rms[valid]))
     straddle = fit_rms > max(RESID_FACTOR * rms_ref, RESID_MIN_RAD)
+    # Noise level of the statistic: from windows that fit (a window with a discontinuity
+    # inside it says nothing about the noise), unless that leaves too little.
+    calm = valid & ~straddle
+    if calm.sum() < PHASE_RATE:
+        calm = valid
+    sigma = 1.4826 * np.median(np.abs(jump[calm] - np.median(jump[calm]))) + 1e-6
     valid &= ~bad & ~straddle
     aj = np.abs(np.where(valid, jump, 0.0))
     thr_p = max(PHASE_JUMP_MIN_RAD, PHASE_Z * sigma)
@@ -279,8 +314,15 @@ def detect_enf(x: np.ndarray, sr: int) -> Evidence:
     else:
         fs_abs, thr_f, raw_f, fsig = np.zeros(len(f)), FREQ_STEP_MIN_HZ, 0.0, float("nan")
 
-    score_p = calibrate(raw_p, thr_p, 0.25 * thr_p)
-    score_f = calibrate(raw_f, thr_f, 0.25 * thr_f)
+    # Phase noise so large that no jump can exceed the threshold (it is wrapped to pi):
+    # the line is too disturbed to carry a continuity test, and its frequency track is
+    # just as unreliable. Only dropouts are scored then.
+    too_noisy = thr_p >= np.pi
+    if too_noisy:
+        aj[:] = 0.0
+        fs_abs = np.zeros_like(fs_abs)
+    score_p = 0.0 if too_noisy else calibrate(raw_p, thr_p, PHASE_SOFTNESS * thr_p)
+    score_f = 0.0 if too_noisy else calibrate(raw_f, thr_f, 0.25 * thr_f)
     score_d = calibrate(raw_d, DROPOUT_DB, DROPOUT_SOFTNESS_DB) if drop_depth else 0.0
     score = max(score_p, score_f, score_d)
 
@@ -298,7 +340,7 @@ def detect_enf(x: np.ndarray, sr: int) -> Evidence:
         kept = [j for j in kept if not any(
             abs(td[j] - td[m]) < SIDELOBE_S and aj[j] < SIDELOBE_RATIO * aj[m] for m in kept)]
         for j in kept:
-            events.append((float(td[j]), calibrate(aj[j], thr_p, 0.25 * thr_p),
+            events.append((float(td[j]), calibrate(aj[j], thr_p, PHASE_SOFTNESS * thr_p),
                            f"ENF phase jump {aj[j]:.2f} rad"))
     if fs_abs.size:
         fc = np.flatnonzero(fs_abs >= thr_f)
@@ -312,7 +354,11 @@ def detect_enf(x: np.ndarray, sr: int) -> Evidence:
     segments = [Segment(max(0.0, te - 0.5), min(dur, te + 0.5), sc, lab) for te, sc, lab in events]
 
     snr = best["snr_db"]
+    # A random cut shifts the phase uniformly in (-pi, pi]; only shifts above the threshold show.
+    visible = float(np.clip(1.0 - thr_p / np.pi, 0.0, 1.0))
     confidence = float(np.clip(0.3 + (snr - HUM_SNR_MIN_DB) / 25.0, 0.3, 0.9))
+    if too_noisy and not drop_depth:
+        confidence = 0.3                 # nothing could be tested
     markers = [e[0] for e in events]
     # Phase residual for display: remove a slow (10 s) trend so drift does not dominate.
     resid = ph - uniform_filter1d(ph, size=int(10 * PHASE_RATE), mode="nearest")
@@ -332,14 +378,22 @@ def detect_enf(x: np.ndarray, sr: int) -> Evidence:
                    f"{DROPOUT_DB:.0f}). The hum of a "
                    f"continuous recording cannot jump; this indicates a cut or splice at "
                    + ", ".join(f"{e[0]:.2f} s" for e in events[:5]) + ".")
+    elif too_noisy:
+        summary = (f"Mains hum at {nominal:.0f} Hz (harmonic {k}, SNR {snr:.1f} dB) is present but "
+                   f"too disturbed for a continuity test: its phase wanders so much that the "
+                   f"threshold ({thr_p:.2f} rad) exceeds the largest possible jump (pi). No "
+                   f"hum dropouts. This says nothing about cuts.")
     else:
         summary = (f"Mains hum at {nominal:.0f} Hz (harmonic {k}, SNR {snr:.1f} dB) is "
                    f"continuous: largest phase jump {raw_p:.2f} rad (threshold {thr_p:.2f}), "
                    f"largest frequency step {raw_f * 1000:.0f} mHz (threshold "
-                   f"{thr_f * 1000:.0f}). Note: a cut of a whole number of hum cycles would "
-                   f"not show.")
+                   f"{thr_f * 1000:.0f}). With this much interference around the hum line only "
+                   f"about {visible:.0%} of cuts would produce a visible jump; a cut of a whole "
+                   f"number of hum cycles never shows.")
     details = {
         "raw_phase_jump_rad": raw_p, "phase_threshold_rad": thr_p, "phase_sigma_rad": sigma,
+        "visible_cut_fraction": visible, "hum_level_spread_db": spread,
+        "phase_test_usable": not too_noisy,
         "raw_freq_step_hz": raw_f, "freq_threshold_hz": thr_f, "freq_sigma_hz": fsig,
         "hum_nominal_hz": nominal, "hum_harmonic": k, "hum_freq_hz": fh, "hum_snr_db": snr,
         "hum_lines": lines, "enf_mean_hz": float(np.mean(f)) if len(f) else None,

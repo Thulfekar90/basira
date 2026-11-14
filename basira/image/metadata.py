@@ -13,7 +13,7 @@ from PIL import Image
 
 from ..core.types import Category, Evidence, Region
 from ..core.utils import calibrate, iptc_source_types, scan_signatures
-from .load import ImageData
+from .load import DECODE_LOCK, ImageData, open_untrusted
 
 EXIF_MAKE, EXIF_MODEL, EXIF_SOFTWARE, EXIF_DATETIME = 271, 272, 305, 306
 EXIF_DT_ORIG, EXIF_DT_DIGI = 36867, 36868
@@ -35,6 +35,11 @@ GEN_SIZES = {(512, 512), (768, 768), (1024, 1024), (512, 768), (768, 512), (1024
              (1792, 1024), (896, 1152), (1152, 896), (832, 1216), (1216, 832), (1344, 768),
              (768, 1344), (1536, 640), (640, 1536), (1536, 1024), (1024, 1536),
              (2048, 2048), (1456, 816), (816, 1456), (1232, 928), (928, 1232)}
+
+MAX_XMP_BYTES = 200_000            # XMP packets are a few kB; nothing longer is parsed
+XMP_MAX_OPENERS = 8                # "<x:xmpmeta" openers tried before giving up
+MAX_THUMB_PIXELS = 2_000_000       # an EXIF thumbnail is ~160x120; larger ones are not decoded
+MAX_TEXT_FIELD = 1 << 20           # bytes of one text chunk that are inspected
 
 DATE_TOLERANCE_S = 2.0
 THUMB_MISMATCH_THRESHOLD = 0.12   # p99 of smoothed |thumbnail - image| (0..1)
@@ -58,9 +63,21 @@ def _xmp_text(d: ImageData) -> str:
     for k in ("xmp", "XML:com.adobe.xmp"):
         v = d.pil_info.get(k)
         if v:
+            v = v[:MAX_XMP_BYTES]
             return v.decode("utf-8", "ignore") if isinstance(v, bytes) else str(v)
-    m = re.search(rb"<x:xmpmeta[\s\S]{0,200000}?</x:xmpmeta>", d.raw[: 4 << 20])
-    return m.group(0).decode("utf-8", "ignore") if m else ""
+    # Plain substring search, not a regular expression: a file can contain hundreds of
+    # thousands of unterminated "<x:xmpmeta" openers, and a lazy regex would rescan
+    # 200 kB after each of them (minutes of CPU for a 1 MB file).
+    head = d.raw[: 4 << 20]
+    start = head.find(b"<x:xmpmeta")
+    for _ in range(XMP_MAX_OPENERS):
+        if start < 0:
+            break
+        end = head.find(b"</x:xmpmeta>", start, start + MAX_XMP_BYTES + 32)
+        if end >= 0:
+            return head[start:end + 12].decode("utf-8", "ignore")
+        start = head.find(b"<x:xmpmeta", start + 1)
+    return ""
 
 
 def _valid_generator_payload(key: str, txt: str) -> bool:
@@ -105,6 +122,7 @@ def _generator_from_text(info: Dict[str, Any]) -> List[Dict[str, Any]]:
         v = info.get(key)
         if not v:
             continue
+        v = v[:MAX_TEXT_FIELD] if isinstance(v, (bytes, str)) else v
         txt = v.decode("utf-8", "ignore") if isinstance(v, bytes) else str(v)
         if len(txt.strip()) < 8:
             continue
@@ -117,6 +135,7 @@ def _generator_from_text(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     for key in ("Software", "Comment", "Description", "Source", "Title"):
         v = info.get(key)
         if isinstance(v, (str, bytes)):
+            v = v[:MAX_TEXT_FIELD]
             txt = v.decode("utf-8", "ignore") if isinstance(v, bytes) else v
             if re.search(r"NovelAI|Stable Diffusion|Midjourney|DALL.?E\b|Adobe Firefly|"
                          r"Imagen\b|FLUX\.1", txt):
@@ -126,7 +145,10 @@ def _generator_from_text(info: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def extract_exif_thumbnail(raw: bytes) -> Optional[np.ndarray]:
-    """Return the JPEG thumbnail embedded in the EXIF APP1 segment, if any."""
+    """Return the JPEG thumbnail embedded in the EXIF APP1 segment, if any.
+
+    Only a baseline-sized JPEG is decoded: the embedded stream is opened with the JPEG
+    decoder alone, and skipped if its header declares more than ``MAX_THUMB_PIXELS``."""
     if raw[:2] != b"\xff\xd8":
         return None
     i = 2
@@ -135,14 +157,20 @@ def extract_exif_thumbnail(raw: bytes) -> Optional[np.ndarray]:
         if marker in (0xD9, 0xDA):
             break
         seglen = int.from_bytes(raw[i + 2:i + 4], "big")
+        if seglen < 2:
+            break                      # malformed segment length: stop, do not resynchronise
         if marker == 0xE1 and raw[i + 4:i + 10] == b"Exif\x00\x00":
             seg = raw[i + 10:i + 2 + seglen]
             j = seg.find(b"\xff\xd8\xff", 8)
             if j > 0:
                 k = seg.find(b"\xff\xd9", j)
                 try:
-                    th = Image.open(io.BytesIO(seg[j:k + 2 if k > 0 else len(seg)]))
-                    return np.asarray(th.convert("RGB"))
+                    with DECODE_LOCK:
+                        th = open_untrusted(seg[j:k + 2 if k > 0 else len(seg)],
+                                            formats=("JPEG",))
+                        if th.width * th.height > MAX_THUMB_PIXELS or min(th.size) < 1:
+                            return None
+                        return np.asarray(th.convert("RGB"))
                 except Exception:
                     return None
         i += 2 + seglen
@@ -237,7 +265,14 @@ def analyze_metadata(d: ImageData) -> List[Evidence]:
     # ---------------- 3. EXIF thumbnail vs image ---------------- #
     try:
         thumb = extract_exif_thumbnail(d.raw) if d.is_jpeg else None
-        if thumb is not None and thumb.size > 0:
+        if thumb is not None and thumb.size > 0 and d.truncated:
+            # The undecoded part of a damaged file is blank filler; it will always differ
+            # from the thumbnail, and that says nothing about editing.
+            out.append(Evidence.not_applicable(
+                "image.thumbnail", "EXIF thumbnail consistency", Category.MANIPULATION,
+                "the file is truncated or damaged, so the image cannot be compared with "
+                "its thumbnail"))
+        elif thumb is not None and thumb.size > 0:
             out.append(_thumbnail_evidence(d.rgb, thumb))
     except Exception as e:   # one broken sub-check must not discard the other metadata
         out.append(Evidence.failed("image.thumbnail", "EXIF thumbnail consistency",

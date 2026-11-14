@@ -243,14 +243,110 @@ SIGNATURES: List[Tuple[bytes, str, str]] = [
 ]
 
 
+def _split_top(pat: bytes) -> Optional[List[bytes]]:
+    """Split a regex on its top-level ``|``; None if it is not simple enough to split."""
+    parts, depth, cls, cur, i = [], 0, False, bytearray(), 0
+    while i < len(pat):
+        c = pat[i:i + 1]
+        if c == b"\\":
+            cur += pat[i:i + 2]
+            i += 2
+            continue
+        if cls:
+            cls = c != b"]"
+        elif c == b"[":
+            cls = True
+        elif c == b"(":
+            depth += 1
+        elif c == b")":
+            depth -= 1
+        elif c == b"|" and depth == 0:
+            parts.append(bytes(cur))
+            cur = bytearray()
+            i += 1
+            continue
+        cur += c
+        i += 1
+    parts.append(bytes(cur))
+    return parts if depth == 0 and not cls else None
+
+
+def _required_literal(alt: bytes) -> Optional[bytes]:
+    """The longest run of literal bytes that every match of this alternative contains."""
+    best, run, i, depth = b"", bytearray(), 0, 0
+    while i < len(alt):
+        c = alt[i:i + 1]
+        if depth:
+            if c == b"\\":
+                i += 2
+                continue
+            depth += {b"(": 1, b")": -1}.get(c, 0)
+            i += 1
+            continue
+        if c == b"\\":
+            nxt = alt[i + 1:i + 2]
+            if nxt and not nxt.isalnum():
+                run += nxt
+            else:                                   # \b, \d, \s, \xNN ... end a run
+                best, run = max(best, bytes(run), key=len), bytearray()
+                if nxt == b"x":
+                    i += 2
+            i += 2
+            continue
+        if c in b"?*{":                             # the previous byte is optional
+            if run:
+                run = run[:-1]
+            best, run = max(best, bytes(run), key=len), bytearray()
+            if c == b"{":
+                i = alt.index(b"}", i)
+            i += 1
+            continue
+        if c in b".^$+[(":
+            best, run = max(best, bytes(run), key=len), bytearray()
+            if c == b"[":
+                i = alt.index(b"]", i + 2)
+            elif c == b"(":
+                depth = 1
+            i += 1
+            continue
+        run += c
+        i += 1
+    best = max(best, bytes(run), key=len)
+    return best if len(best) >= 3 else None
+
+
+def _anchors(pat: bytes) -> Optional[List[bytes]]:
+    """Literals of which at least one occurs in any match of ``pat``; None if unknown."""
+    alts = _split_top(pat)
+    if alts is None:
+        return None
+    lits = [_required_literal(a) for a in alts]
+    return None if any(x is None for x in lits) else lits
+
+
+_SIG_COMPILED = None
+
+
+def _compiled_signatures():
+    global _SIG_COMPILED
+    if _SIG_COMPILED is None:
+        _SIG_COMPILED = [(re.compile(p), _anchors(p), label, kind) for p, label, kind in SIGNATURES]
+    return _SIG_COMPILED
+
+
 def scan_signatures(data: bytes, kinds: Optional[Iterable[str]] = None) -> List[Dict[str, str]]:
-    """Find known generator / editor / provenance markers in raw bytes."""
+    """Find known generator / editor / provenance markers in raw bytes.
+
+    Each pattern is only run when one of its required literals occurs in the data: a plain
+    ``bytes in`` test is about a hundred times faster than the regex over a 6 MB window."""
     found: Dict[str, Dict[str, str]] = {}
     allowed = set(kinds) if kinds else None
-    for pat, label, kind in SIGNATURES:
+    for rx, anchors, label, kind in _compiled_signatures():
         if allowed and kind not in allowed:
             continue
-        m = re.search(pat, data)
+        if anchors is not None and not any(a in data for a in anchors):
+            continue
+        m = rx.search(data)
         if m and label not in found:
             lo = max(0, m.start() - 24)
             ctx = data[lo: m.end() + 40]

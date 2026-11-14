@@ -54,14 +54,20 @@ def test_frozen_frames_are_located(out):
     assert ev.score > 0.5 and _near(ev.segments, truth[0])
 
 
-def test_inserted_foreign_footage_is_located(out):
+def test_inserted_foreign_footage_is_two_ordinary_cuts(out):
+    """Footage from another (much noisier) camera cut in with hard cuts. This used to be
+    asserted as "located", which only held because every hard cut between similar-looking
+    shots was reported as removed frames: on real footage that flagged 27 of 27 legitimate
+    multi-shot clips (benchmarks/video_robustness.py). A hard cut is what an edited video
+    consists of, and the noise level per shot follows content more than camera, so the
+    engine now reports two scene cuts, says what it cannot see, and does not accuse."""
     path, truth = V.make_insert(out, 4)
     r = basira.analyze(path)
-    assert r.verdict_level >= 2
-    assert _near(r.fused_segments, truth[0]) and _near(r.fused_segments, truth[1])
-    # video.source is deliberately not asserted: H.264 flattens most of the noise
-    # difference between sources, so it is only weak corroborating evidence.
-    assert r.get("video.source").error is None
+    jump, source = r.get("video.jump"), r.get("video.source")
+    assert jump.details["scene_cuts"] == 2 and jump.score < 0.5 and not jump.segments
+    assert source.error is None and source.confidence == 0 and not source.segments
+    assert source.details["informational"] is True
+    assert r.verdict_level == 0 and not r.fused_segments
 
 
 @pytest.mark.parametrize("gop1", [12, 18])

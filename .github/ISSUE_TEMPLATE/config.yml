@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem (a file that crashes, hangs or escapes the sandbox)
+    url: https://github.com/OWNER/basira/security/policy
+    about: Please report it privately as described in SECURITY.md, not in a public issue.
+  - name: How do I ...? / What does this result mean?
+    url: https://github.com/OWNER/basira/blob/main/docs/USAGE.md
+    about: The usage guide answers the common questions, including why an AI-generated image comes back clean.

@@ -1,22 +1,37 @@
 [build-system]
-requires = ["setuptools>=68"]
+# 77 is the first setuptools that understands the SPDX `license = "MIT"` form (PEP 639).
+# pip builds in an isolated environment and fetches it, so the version of setuptools
+# installed on the user's machine does not matter.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "basira"
-version = "0.1.0"
+version = "0.1.0"          # keep in step with basira/__init__.py (tests/test_packaging.py checks)
 description = "Explainable forensics for AI-generated and manipulated images, audio and video: where was it edited, and why do we think so."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Basira contributors" }]
 keywords = ["forensics", "deepfake", "image-forensics", "audio-forensics", "video-forensics",
             "tamper-detection", "ai-generated", "c2pa", "copy-move", "splicing"]
 classifiers = [
   "Development Status :: 3 - Alpha",
+  "Environment :: Console",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Information Technology",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Multimedia",
+  "Topic :: Multimedia :: Graphics",
+  "Topic :: Multimedia :: Sound/Audio :: Analysis",
+  "Topic :: Multimedia :: Video",
   "Topic :: Scientific/Engineering :: Image Processing",
   "Topic :: Security",
 ]
@@ -30,7 +45,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+# Everything needed to run the test suite and the benchmarks.
+dev = [
+  "pytest>=7",
+  "tomli>=1.1; python_version < '3.11'",
+]
+
+[project.urls]
+# OWNER is a placeholder, exactly as in README.md: docs/PUBLISHING.md says when to replace it.
+Homepage = "https://github.com/OWNER/basira"
+Documentation = "https://github.com/OWNER/basira/blob/main/docs/USAGE.md"
+Repository = "https://github.com/OWNER/basira"
+Issues = "https://github.com/OWNER/basira/issues"
+Changelog = "https://github.com/OWNER/basira/blob/main/CHANGELOG.md"
 
 [project.scripts]
 basira = "basira.cli:main"

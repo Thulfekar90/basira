@@ -1,0 +1,54 @@
+name: New detector proposal
+description: Propose a forensic method before writing it, so the evidence it needs is agreed first.
+labels: ["detector"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Basira prefers a few reliable detectors to many flaky ones. A detector is merged only with a
+        synthetic forgery with ground truth, a clean-file test, measured thresholds and a stated blind
+        spot (CONTRIBUTING.md; a full worked example is in docs/ADDING_A_DETECTOR.md).
+  - type: textarea
+    id: finds
+    attributes:
+      label: What kind of edit or generation does it find, in which media?
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: The method
+      description: The physical or statistical trace it relies on, and references (papers, standards).
+    validations:
+      required: true
+  - type: textarea
+    id: precondition
+    attributes:
+      label: Preconditions and blind spots
+      description: >
+        Which files does it apply to (format, compression, size)? What erases the trace (re-compression,
+        resizing, noise)? What untouched content could look like a positive?
+    validations:
+      required: true
+  - type: textarea
+    id: forgery
+    attributes:
+      label: How would a test forgery with ground truth be generated?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Measurements so far
+      description: >
+        Numbers on clean files and on forgeries, and on which data. "None yet" is a fine answer; numbers
+        on data you did not generate yourself will be needed before merging.
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: "It needs no model download, no network access and no GPU"
+        - label: "It adds no new runtime dependency (or the proposal explains why one is worth it)"

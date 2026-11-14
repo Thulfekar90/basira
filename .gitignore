@@ -1,11 +1,25 @@
+# environments
 .venv/
+venv/
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.egg-info/
 build/
 dist/
+wheels/
 .pytest_cache/
+.coverage
+htmlcov/
+
+# Basira output: reports written next to scanned files, demo output
 *.basira.html
-.DS_Store
-.claude/
 examples/out/
+
+# editors / OS / tools
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/

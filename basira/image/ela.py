@@ -37,6 +37,10 @@ def analyze_ela(d: ImageData) -> Evidence:
     if min(h, w) < 4 * BLOCK:
         return Evidence.not_applicable("image.ela", "Error level analysis",
                                        Category.MANIPULATION, "image too small")
+    if max(h, w) > 65500:                                  # the JPEG format's own size limit
+        return Evidence.not_applicable("image.ela", "Error level analysis",
+                                       Category.MANIPULATION,
+                                       "image too large to re-save as JPEG")
     q = d.jpeg_quality if (d.is_jpeg and d.jpeg_quality) else 90
     q = int(np.clip(q, 70, 98))
     re = _resave(rgb, q).astype(np.float32)

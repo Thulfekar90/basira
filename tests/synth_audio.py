@@ -169,3 +169,132 @@ def make_all(duration: float = 30.0, sr: int = SR) -> Dict[str, Tuple[np.ndarray
         "zeros": (quantize16(zer), t_zer),
         "tts": (quantize16(tts_like(duration, sr)), None),
     }
+
+
+# --------------------------------------------------------------------------- #
+# A more realistic recording chain (benchmarks/audio_robustness.py)
+#
+# ``simulate_recording`` turns any dry speech signal (the benchmark uses offline
+# text-to-speech output; the tests use ``speech_like``) into something closer to a
+# microphone recording than ``recording`` above: reverberation, coloured room noise
+# whose level wanders, optional mains hum with harmonics, and low-level background
+# events. It is still a simulation -- no real microphone, pre-amp, AGC or codec chain.
+# --------------------------------------------------------------------------- #
+def room_ir(sr: int = SR, rt60: float = 0.35, seed: int = 0, drr_db: float = 8.0) -> np.ndarray:
+    """Synthetic room impulse response: direct sound, three early reflections and an
+    exponentially decaying noise tail (60 dB down after ``rt60`` s) whose high
+    frequencies die faster. ``drr_db`` = direct-to-reverberant energy ratio."""
+    rng = np.random.default_rng(seed)
+    n = int(min(1.5, 1.3 * rt60) * sr)
+    t = np.arange(n) / sr
+    tail = rng.standard_normal(n) * 10 ** (-3.0 * t / rt60)
+    dark = sosfilt(butter(1, 3500.0, btype="low", fs=sr, output="sos"), tail)
+    mix = np.clip(t / (0.6 * rt60), 0, 1)            # tail gets duller with time
+    tail = (1 - mix) * tail + mix * dark * 2.0
+    tail[: int(0.004 * sr)] = 0.0
+    for _ in range(3):
+        tail[int(rng.uniform(0.004, 0.03) * sr)] += rng.uniform(2.0, 5.0) * rng.choice([-1, 1])
+    tail *= 10 ** (-drr_db / 20) / (np.sqrt(np.sum(tail ** 2)) + 1e-12)
+    ir = tail
+    ir[0] = 1.0
+    return ir
+
+
+def coloured_noise(n: int, sr: int = SR, seed: int = 0, level_db: float = -55.0,
+                   tilt: float = 0.5, wander_db: float = 1.0) -> np.ndarray:
+    """Room noise: 1/f^tilt-shaped Gaussian noise + low-frequency rumble + a white
+    (microphone self-noise) component; RMS ``level_db`` dBFS; its level wanders slowly
+    by about ``wander_db`` (ventilation, traffic)."""
+    rng = np.random.default_rng(seed)
+    spec = np.fft.rfft(rng.standard_normal(n))
+    f = np.fft.rfftfreq(n, 1.0 / sr)
+    shape = 1.0 / np.maximum(f, 40.0) ** tilt
+    shape = shape + 4.0 * shape[0] * np.exp(-f / 120.0)       # rumble below ~150 Hz
+    x = np.fft.irfft(spec * shape, n)
+    x = x / x.std() + 0.15 * rng.standard_normal(n)
+    x *= 10 ** (wander_db * _ctrl(rng, n / sr, 3.0, n, sr) / 20.0)
+    return x * 10 ** (level_db / 20) / x.std()
+
+
+def hum_harmonics(n: int, sr: int = SR, seed: int = 0, freq: float = 50.0,
+                  level_db: float = -58.0, drift_hz: float = 0.02) -> np.ndarray:
+    """Mains hum with odd-heavy harmonics up to the 5th; frequency wanders like ENF."""
+    rng = np.random.default_rng(seed)
+    f = freq + drift_hz * _ctrl(rng, n / sr, 4.0, n, sr)
+    ph = 2 * np.pi * np.cumsum(f) / sr + rng.uniform(0, 2 * np.pi)
+    rel = (1.0, rng.uniform(0.2, 0.6), rng.uniform(0.3, 0.8), rng.uniform(0.05, 0.2),
+           rng.uniform(0.1, 0.4))
+    x = sum(a * np.sin(k * ph + rng.uniform(0, 2 * np.pi)) for k, a in enumerate(rel, start=1))
+    return x * 10 ** (level_db / 20) * np.sqrt(2.0)
+
+
+def background_events(n: int, sr: int = SR, seed: int = 0, count: int = 3,
+                      level_db: float = -45.0) -> np.ndarray:
+    """A few short low-level sounds a real room produces (a creak, paper, a tap):
+    band-passed noise bursts of 30-300 ms with a fast attack and slow decay."""
+    rng = np.random.default_rng(seed)
+    out = np.zeros(n)
+    for _ in range(count):
+        L = int(rng.uniform(0.03, 0.3) * sr)
+        if L >= n:
+            continue
+        lo = rng.uniform(150.0, 2500.0)
+        hi = min(lo * rng.uniform(1.5, 6.0), 0.45 * sr)
+        b = sosfilt(butter(2, [lo, hi], btype="band", fs=sr, output="sos"),
+                    rng.standard_normal(L))
+        env = np.exp(-np.arange(L) / (rng.uniform(0.1, 0.4) * L))
+        env[: max(1, int(0.003 * sr))] *= np.linspace(0, 1, max(1, int(0.003 * sr)))
+        b = b * env
+        s0 = rng.integers(0, n - L)
+        out[s0:s0 + L] += b * 10 ** ((level_db + rng.uniform(-6, 6)) / 20) / (b.std() + 1e-12)
+    return out
+
+
+def slow_agc(x: np.ndarray, sr: int = SR, target_db: float = -23.0, max_gain_db: float = 10.0,
+             max_cut_db: float = 6.0, attack_s: float = 0.15, release_s: float = 1.5
+             ) -> np.ndarray:
+    """Simple automatic gain control as found in phones and dictaphones: the gain follows
+    the 10 ms block level (fast when the level rises, slowly when it falls), so the noise
+    floor is pumped up during pauses. Limited to ``-max_cut_db`` .. ``+max_gain_db``."""
+    blk = max(1, int(0.01 * sr))
+    m = len(x) // blk
+    if m < 2:
+        return x
+    lev = 10 * np.log10(np.mean(x[: m * blk].reshape(m, blk) ** 2, axis=1) + 1e-12)
+    a_up, a_dn = np.exp(-0.01 / attack_s), np.exp(-0.01 / release_s)
+    sm = np.empty(m)
+    cur = lev[0]
+    for i in range(m):
+        a = a_up if lev[i] > cur else a_dn
+        cur = a * cur + (1 - a) * lev[i]
+        sm[i] = cur
+    gain_db = np.clip(target_db - 6.0 - sm, -max_cut_db, max_gain_db)
+    g = np.interp(np.arange(len(x)), (np.arange(m) + 0.5) * blk, gain_db)
+    return x * 10 ** (g / 20)
+
+
+def simulate_recording(speech: np.ndarray, sr: int = SR, seed: int = 0, *,
+                       speech_db: float = -23.0, rt60: float = 0.35, noise_db: float = -55.0,
+                       noise_tilt: float = 0.5, hum_db: float = None, hum_freq: float = 50.0,
+                       events: int = 2, agc: bool = False) -> np.ndarray:
+    """Dry speech -> simulated room recording (float64, not yet quantised).
+
+    ``speech_db`` is the RMS level of the active speech; ``hum_db=None`` means a
+    recording without mains hum (battery-powered device away from the grid);
+    ``agc=True`` passes the result through :func:`slow_agc`.
+    """
+    from scipy.signal import fftconvolve
+
+    x = np.asarray(speech, dtype=np.float64)
+    n = len(x)
+    wet = fftconvolve(x, room_ir(sr, rt60, seed + 11), mode="full")[:n]
+    act = np.abs(wet) > 0.02 * np.max(np.abs(wet) + 1e-12)
+    wet *= 10 ** (speech_db / 20) / (np.sqrt(np.mean(wet[act] ** 2)) + 1e-12)
+    y = wet + coloured_noise(n, sr, seed + 12, noise_db, noise_tilt)
+    if hum_db is not None:
+        y = y + hum_harmonics(n, sr, seed + 13, hum_freq, hum_db)
+    if events:
+        y = y + background_events(n, sr, seed + 14, events, noise_db + 12.0)
+    if agc:
+        y = slow_agc(y, sr, target_db=speech_db)
+    return np.clip(y, -0.999, 0.999)

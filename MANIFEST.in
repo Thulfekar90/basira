@@ -1,0 +1,10 @@
+# What goes into the source distribution (the wheel contains only the basira package).
+include LICENSE README.md README.ar.md CHANGELOG.md CONTRIBUTING.md SECURITY.md CITATION.cff
+recursive-include docs *.md *.jpg *.png
+recursive-include tests *.py
+recursive-include benchmarks *.py
+include examples/make_demo.py
+prune examples/out
+prune build
+prune .github
+global-exclude __pycache__ *.py[cod] .DS_Store *.basira.html

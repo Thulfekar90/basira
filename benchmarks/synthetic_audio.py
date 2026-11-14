@@ -4,7 +4,11 @@
 
 Each recording is 30 s of speech-like signal + room noise + weak 50 Hz mains hum
 (tests/synth_audio.py). An edit counts as located when a reported segment lies within
-0.5 s of the true edit time. Synthetic data: validates the implementation only.
+0.5 s of the true edit time. Synthetic data: validates the implementation only. The
+"speech" is a buzz with long, perfectly clean pauses and the foreign room differs in every
+respect, which is why these numbers are far better than those of
+benchmarks/audio_robustness.py (text-to-speech in simulated rooms, re-encoded) -- quote
+that one when describing what the engine can do.
 """
 from __future__ import annotations
 

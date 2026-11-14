@@ -25,6 +25,14 @@ Cues
 
 ``raw = W_CLEAN * clean_fraction + W_FLAT * flat_cue + W_LINES * min(1, n_lines / 3)``;
 ``score = calibrate(raw, RAW_THRESHOLD, RAW_SOFTNESS)``.
+
+Measured on real text-to-speech (21 macOS ``say`` voices, benchmarks/audio_robustness.py):
+the cues exceed their threshold for 8 voices -- those rendered on digital silence. The
+other 13 leave dither-level noise (-82..-88 dBFS) or breath-like sound in their pauses
+and pass. After the speech is played into a (simulated) room no voice is detected, and
+after resampling to 16 kHz none reaches "Suspicious". So this detector can only add
+weight to a suspicion; a quiet result says nothing about whether the speech is human,
+and its summary says so.
 """
 from __future__ import annotations
 
@@ -141,9 +149,13 @@ def detect_synthetic(x: np.ndarray, sr: int, *, lossy: bool = False) -> Evidence
         head = (f"No synthetic-speech cues: pauses carry a natural noise floor "
                 f"({clean_frac:.0%} unnaturally clean), floor spread "
                 f"{spread:.2f} dB, no persistent high-frequency lines.")
-    summary = (f"{head} Combined cue {raw:.2f} (threshold {RAW_THRESHOLD:.2f}). These DSP "
-               f"heuristics are weak compared with trained detectors; noise gates and "
-               f"denoisers produce the same clean pauses.")
+    if score >= 0.5:
+        tail = ("These DSP heuristics are weak compared with trained detectors; noise gates and "
+                "denoisers produce the same clean pauses.")
+    else:
+        tail = ("This is not evidence of human speech: most text-to-speech voices tested (13 of "
+                "21) pass this check, and all of them do once re-recorded in a room.")
+    summary = f"{head} Combined cue {raw:.2f} (threshold {RAW_THRESHOLD:.2f}). {tail}"
     pt = t[pause]
     series = {"pause_levels": make_series(pt, np.maximum(db[pause], -140.0),
                                           "pause frame level (dBFS)")}

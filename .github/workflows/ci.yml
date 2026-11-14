@@ -1,20 +1,112 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
+    name: test (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    # Windows was added without ever having been run (see CONTRIBUTING.md). Until someone
+    # has seen it pass, a Windows failure is shown but does not turn the run red. Remove
+    # the `experimental` entries below once it is green.
+    continue-on-error: ${{ matrix.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python: ["3.9", "3.12"]
+        python: ["3.9", "3.13"]
+        include:
+          - { os: ubuntu-latest, python: "3.10" }
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: windows-latest, python: "3.9", experimental: true }
+          - { os: windows-latest, python: "3.13", experimental: true }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: pip install -e ".[dev]"
-      - run: python -m pytest -q
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Environment report
+        run: basira doctor --strict
+      - name: Tests
+        run: python -m pytest -q
+
+  demo:
+    name: demo reports
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install -e ".[dev]"
+      - name: Generate forgeries with ground truth and analyse them
+        run: python examples/make_demo.py demo-out
+      - name: Upload the HTML reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-reports
+          path: demo-out/*.basira.html
+          if-no-files-found: error
+          retention-days: 14
+
+  package:
+    name: build, install the wheel, run it
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Build sdist and wheel
+        # `python -m build` builds the wheel FROM the sdist, so a file missing from the
+        # sdist breaks this step instead of a user's install.
+        run: |
+          python -m pip install build
+          python -m build
+      - name: Check what was packaged
+        run: python .github/scripts/check_dist.py dist
+      - name: Install the wheel in a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/clean"
+          "$RUNNER_TEMP/clean/bin/python" -m pip install dist/*.whl
+      - name: Run the installed command on a generated file
+        # Run from an empty directory so that the installed package is used, not the checkout.
+        run: |
+          mkdir "$RUNNER_TEMP/work" && cd "$RUNNER_TEMP/work"
+          export PATH="$RUNNER_TEMP/clean/bin:$PATH"
+          basira --version
+          basira doctor --strict
+          python "$GITHUB_WORKSPACE/.github/scripts/make_sample.py" sample.jpg
+          basira scan sample.jpg
+          test -s sample.jpg.basira.html
+          basira scan sample.jpg --json --no-html > report.json
+          python -c "import json; d = json.load(open('report.json')); assert d['schema_version'] == 1 and d['media_type'] == 'image', d"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

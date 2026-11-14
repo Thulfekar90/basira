@@ -26,8 +26,14 @@ def _background(seed: int, w: int = W * 3, h: int = H * 2) -> np.ndarray:
     return np.clip(out, 0, 255)
 
 
-def make_frames(n: int = 240, seed: int = 0, noise: float = 3.0) -> List[np.ndarray]:
-    """A slow camera pan over a textured scene with moving objects and sensor noise."""
+def make_frames(n: int = 240, seed: int = 0, noise: float = 3.0, camera=None, jolt=None,
+                object_speed: float = 1.0) -> List[np.ndarray]:
+    """A slow camera pan over a textured scene with moving objects and sensor noise.
+
+    ``camera(t)`` overrides the horizontal position of the camera (pixels) and ``jolt(t)``
+    adds a vertical displacement, for whip pans, abrupt pan starts and knocks;
+    ``object_speed`` scales the motion of the discs (slow motion).
+    """
     rng = np.random.RandomState(seed)
     bg = _background(seed)
     objs = [(rng.randint(40, W - 40), rng.randint(40, H - 40), rng.uniform(-3, 3),
@@ -36,12 +42,14 @@ def make_frames(n: int = 240, seed: int = 0, noise: float = 3.0) -> List[np.ndar
     nrng = np.random.RandomState(seed + 7)
     frames = []
     for t in range(n):
-        x0 = int(20 + 1.6 * t)
-        y0 = int(30 + 18 * np.sin(t / 40.0) + 30)
+        x0 = int(20 + 1.6 * t) if camera is None else int(camera(t))
+        y0 = int(30 + 18 * np.sin(t / 40.0) + 30) + (int(jolt(t)) if jolt is not None else 0)
+        x0 = int(np.clip(x0, 0, bg.shape[1] - W))
+        y0 = int(np.clip(y0, 0, bg.shape[0] - H))
         fr = bg[y0:y0 + H, x0:x0 + W].copy()
         for (cx, cy, vx, vy, r, col) in objs:
-            px = int((cx + vx * t) % W)
-            py = int((cy + vy * t) % H)
+            px = int((cx + vx * object_speed * t) % W)
+            py = int((cy + vy * object_speed * t) % H)
             cv2.circle(fr, (px, py), int(r), col, -1, cv2.LINE_AA)
         fr += nrng.randn(H, W, 3).astype(np.float32) * noise
         frames.append(np.clip(fr, 0, 255).astype(np.uint8))

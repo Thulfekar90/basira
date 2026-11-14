@@ -1,0 +1,26 @@
+# How to cite Basira. Checked by tests/test_packaging.py: `version` must equal
+# basira.__version__. OWNER is the same placeholder README.md uses (docs/PUBLISHING.md).
+cff-version: 1.2.0
+message: "If you use Basira in research or in a published investigation, please cite it."
+title: "Basira: explainable forensics for edited and AI-generated images, audio and video"
+type: software
+authors:
+  - name: "Basira contributors"
+version: "0.1.0"
+license: MIT
+repository-code: "https://github.com/OWNER/basira"
+url: "https://github.com/OWNER/basira"
+abstract: >-
+  Basira is a Python toolkit of documented signal-processing detectors for media forensics.
+  It localises edits in images (splicing, copy-move, in-painting), audio (cuts, insertions)
+  and video (removed, repeated and inserted frames), reads provenance metadata, and reports
+  each detector's raw statistic, threshold and blind spots. It reports evidence, not proof:
+  measured recall on public datasets is modest and is published with the code.
+keywords:
+  - media forensics
+  - image forensics
+  - audio forensics
+  - video forensics
+  - tamper detection
+  - copy-move
+  - splicing

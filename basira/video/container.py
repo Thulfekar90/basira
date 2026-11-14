@@ -5,6 +5,7 @@ The MP4 / MOV sample tables are parsed directly (no ffprobe needed): frame sizes
 """
 from __future__ import annotations
 
+import os
 import re
 import struct
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -19,6 +20,16 @@ CONTAINERS = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"edts", b"udta", b"m
 MIN_REPEATS = 5             # a periodic spike must repeat at least this often
 PERIOD_Z_THRESHOLD = 6.0     # clean encodes measured <= 3.0; double encodes without B-frames >= 8
 PERIOD_Z_SOFTNESS = 1.0
+# INFORMATIONAL weight. With these confidences the detector alone can never move the verdict
+# (provenance needs >= 0.5 for "Inconclusive"): a re-encode is what every shared video has
+# been through, the same fact that ``video.provenance`` reports at score 0.4 for a
+# transcoder tag. Measured on real footage (benchmarks/video_robustness.py, 585 files of
+# 6-8 s): it fired on 9 of 261 clean / natural files, first-generation encodes among them
+# (periodic content makes frame sizes periodic too). On re-encoded clean clips it was
+# either not applicable (one key frame in 8 s) or blind by construction (old GOP a divisor
+# of the new one); the few remaining cases were missed. Clips that short cannot settle
+# whether it works on real footage, so it does not get a vote.
+DOUBLE_CONF, DOUBLE_CONF_BFRAMES = 0.3, 0.15
 
 
 def _boxes(buf: bytes, start: int, end: int) -> Iterator[Tuple[bytes, int, int]]:
@@ -65,6 +76,85 @@ def _find_moov(path: str) -> Optional[bytes]:
                 return f.read(bsz - hs)
             pos += bsz
     return None
+
+
+MEDIA_BOXES = {b"mdat", b"free", b"skip", b"wide", b"idat"}
+TABLE_BOXES = {b"stts", b"ctts", b"stsc", b"stsz", b"stz2", b"stco", b"co64", b"stss", b"sdtp",
+               b"sbgp", b"sgpd", b"subs", b"saiz", b"saio", b"senc", b"trun", b"tfra", b"sidx"}
+META_PROBE = 64 << 10        # bytes read from the start of a media-data box and from the file tail
+META_BOX_CAP = 64 << 20      # a single metadata box larger than this is not read in full
+META_TOTAL_CAP = 8 << 20     # upper bound on the bytes handed to the signature scan
+
+
+def _strip_tables(buf: bytes) -> bytes:
+    """``buf`` (payload of a moov / moof box) without its sample tables, which are large,
+    binary and never hold provenance text."""
+    drop: List[Tuple[int, int]] = []
+    stack = [(0, len(buf))]
+    while stack:
+        a, b = stack.pop()
+        for typ, s, e in _boxes(buf, a, b):
+            if typ in TABLE_BOXES and e - s > 4096:
+                drop.append((s, e))
+            elif typ in CONTAINERS or typ in (b"traf", b"mvex"):
+                stack.append((s + (4 if typ == b"meta" else 0), e))
+    if not drop:
+        return buf
+    out, pos = [], 0
+    for s, e in sorted(drop):
+        out.append(buf[pos:s])
+        pos = e
+    out.append(buf[pos:])
+    return b"".join(out)
+
+
+def _metadata_bytes(path: str) -> bytes:
+    """The parts of a file that can carry provenance text.
+
+    For MP4 / MOV: every top-level box except the media data, with the sample tables
+    removed, plus the first bytes of each media box (encoder strings) and the file tail.
+    This is a few kilobytes instead of the 6 MB head-and-tail window, which the signature
+    scan (about sixty regular expressions) needed seconds to search. Other containers, and
+    anything that does not parse, fall back to the head-and-tail window.
+    """
+    size = os.path.getsize(path)
+    parts: List[bytes] = []
+    total = 0
+    try:
+        with open(path, "rb") as f:
+            pos, boxes = 0, 0
+            while pos + 8 <= size and total < META_TOTAL_CAP:
+                f.seek(pos)
+                hdr = f.read(16)
+                if len(hdr) < 8:
+                    break
+                bsz, typ = struct.unpack(">I4s", hdr[:8])
+                hs = 8
+                if bsz == 1 and len(hdr) == 16:
+                    bsz = struct.unpack(">Q", hdr[8:16])[0]
+                    hs = 16
+                elif bsz == 0:
+                    bsz = size - pos
+                if bsz < hs or not all(32 <= c < 127 for c in typ):
+                    break
+                f.seek(pos)
+                if typ in MEDIA_BOXES:
+                    chunk = f.read(min(bsz, META_PROBE))
+                else:
+                    chunk = f.read(min(bsz, META_BOX_CAP, size - pos))
+                    if typ in (b"moov", b"moof"):
+                        chunk = chunk[:hs] + _strip_tables(chunk[hs:])
+                parts.append(chunk[:META_TOTAL_CAP - total])
+                total += len(parts[-1])
+                boxes += 1
+                pos += bsz
+            if boxes < 2 or not any(p[4:8] in (b"moov", b"moof") for p in parts):
+                return read_head_tail(path)
+            f.seek(max(0, size - META_PROBE))
+            parts.append(f.read())                 # trailing bytes: appended tags, junk
+    except (OSError, struct.error):
+        return read_head_tail(path)
+    return b"".join(parts)
 
 
 def parse_mp4(path: str) -> Optional[Dict[str, Any]]:
@@ -140,7 +230,7 @@ def _parse_moov(moov: bytes) -> Dict[str, Any]:
 
 def analyze_container(path: str) -> Tuple[List[Evidence], Dict[str, Any]]:
     """Provenance evidence from container metadata. Returns (evidences, info)."""
-    data = read_head_tail(path)
+    data = _metadata_bytes(path)
     sigs = scan_signatures(data)
     src_types = iptc_source_types(data)
     probe = ffmpeg_probe_text(path)
@@ -287,10 +377,12 @@ def analyze_double_compression(mp4: Optional[Dict[str, Any]]) -> Evidence:
     bframes = bool(v.get("has_ctts"))
     return Evidence(
         detector=det, title=title, category=Category.PROVENANCE, score=score,
-        confidence=0.35 if bframes else 0.6,
+        confidence=DOUBLE_CONF_BFRAMES if bframes else DOUBLE_CONF,
         summary=(f"Frame sizes spike every {L} frames (z={z:.1f}) although the current key-frame "
                  f"interval is {gop}: the stream was very likely encoded before with a GOP of "
-                 f"{L} — i.e. this is not the original encoding." if score >= 0.5 else
+                 f"{L} — i.e. this is probably not the original encoding. Informational: "
+                 f"content that repeats at that period produces the same pattern, and a "
+                 f"re-encode alone says nothing about editing." if score >= 0.5 else
                  f"No frame-size periodicity from an earlier encoding (best z={z:.1f}; current "
                  f"GOP {gop})." + (" The stream uses B-frames, which mask this trace: a negative "
                                    "result means little here." if bframes else "")),
