@@ -13,6 +13,13 @@ Nothing has been published yet. This section is derived from the commit history
 
 ### Added
 
+- **"How the verdict was reached"** in the HTML report: a diagram of the analysis (file →
+  each detector → category scores → verdict) drawn only from the report's own numbers. A
+  detector's line is as thick as its weight in the verdict; quiet, not-applicable and failed
+  detectors are drawn as such. Static SVG with the same path written out as five steps, so
+  it reads without JavaScript and in print; the script replays it (respecting reduced
+  motion), and it is mirrored for the Arabic report.
+
 - **Three engines over one evidence model.** Every detector returns its raw statistic, its
   threshold, a plain-language sentence and, where it applies, a heat-map or time ranges;
   an engine fuses them into category scores and a verdict that never says "authentic".

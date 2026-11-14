@@ -275,6 +275,67 @@ def test_content_is_in_the_markup_not_built_by_script(real):
 
 
 # --------------------------------------------------------------------------- #
+# "How the verdict was reached": the diagram is drawn from the report, nothing else
+# --------------------------------------------------------------------------- #
+def _flow_section(html: str) -> str:
+    start = html.index('<section id="flow')
+    return html[start:html.index("</section>", start)]
+
+
+@pytest.mark.parametrize("name", ["splice", "audio", "video", "clean", "garbage"])
+def test_flow_diagram_reflects_the_measurements(real, name):
+    r = real[name]
+    html = render_html(r)
+    check(html)
+    flow = _flow_section(html)
+    assert flow in html[:html.index("<script")], "the diagram must not be built by script"
+    assert RH.STRINGS["en"]["flow"] in flow and 'aria-hidden="true"' in flow
+    # one node per detector and per embedded track, each in its outcome's class
+    nodes = re.findall(r'<g class="nd (fired|quiet|na|failed)">', flow)
+    assert len(nodes) == len(r.evidences) + len(r.children)
+    states = [RH._state(e) for e in r.evidences]
+    assert sorted(nodes[:len(r.evidences)]) == sorted(states)
+    # every detector above its threshold shows its real weight; quiet ones add nothing
+    labels = re.findall(r'class="elab"[^>]*>\+([\d.]+)<', flow)
+    expected = [f"{RH._weight(e):.2f}" for e in r.evidences
+                if RH._state(e) == "fired" and RH._weight(e) >= 0.005]
+    if not r.children:
+        assert sorted(labels) == sorted(expected)
+    else:
+        assert set(expected) <= set(labels)
+    # category nodes print the fused scores, the verdict node the level
+    for cat in ("manipulation", "ai_generation", "provenance"):
+        assert f'>{r.scores.get(cat, 0) * 100:.0f}%</text>' in flow
+    assert f'class="vd lv{r.verdict_level} an"' in flow
+    # the same path in words, with the real counts
+    counts = {s: states.count(s) for s in ("fired", "quiet", "na", "failed")}
+    assert RH.STRINGS["en"]["flow_s2"].format(total=len(r.evidences), **counts) in flow
+    # nodes link to their detector cards and to the embedded track
+    targets = re.findall(r'<a href="#([^"]+)" tabindex="-1">', flow)
+    assert len(targets) == len(r.evidences) + len(r.children)
+
+
+def test_flow_replay_is_wired_and_reading_order_follows_the_language(real):
+    html = render_html(real["video"])
+    section = _flow_section(html)
+    # the script finds the button through the card's parent: both sit in the same section
+    assert 'class="btn js-only replay"' in section and 'class="card flow"' in section
+    assert "f.parentNode.querySelector('.replay')" in RH.JS
+    assert "prefers-reduced-motion:no-preference){\n.flow.play" in RH.CSS
+    en = _flow_section(html)
+    ar = _flow_section(render_html(real["video"], "ar"))
+    assert 'direction="rtl"' not in en and 'direction="rtl"' in ar
+    # numbers stay left-to-right inside the Arabic diagram ("+0.80", never "0.80+")
+    assert not re.search(r'<text class="(n|big n|elab)"[^>]*direction="rtl"', ar)
+    # the diagram is mirrored, not merely translated: the file column is on the right
+    x_en = float(re.search(r'<g class="an" style="--d:0s"><rect class="box" x="([\d.]+)"',
+                           en).group(1))
+    x_ar = float(re.search(r'<g class="an" style="--d:0s"><rect class="box" x="([\d.]+)"',
+                           ar).group(1))
+    assert x_en < RH.FLOW_W / 2 < x_ar
+
+
+# --------------------------------------------------------------------------- #
 # Hostile input
 # --------------------------------------------------------------------------- #
 def nasty(tag: str) -> str:

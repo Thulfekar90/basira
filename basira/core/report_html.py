@@ -171,6 +171,24 @@ STRINGS: Dict[str, Dict[str, Any]] = {
         "plot_alt": "Plot of {y} against {x}, from {x0} to {x1}; values between {y0} and {y1}.",
         "plot_marks": "Marked at {list}.",
         "marked": "marked",
+        # how the verdict was reached (evidence flow diagram)
+        "flow": "How the verdict was reached",
+        "flow_help": "The real path of this analysis, drawn from the measurements above. Each "
+                     "detector's line is as thick as its weight in the verdict: the part of its "
+                     "score above its threshold, times its confidence on this file. Detectors "
+                     "below their threshold add nothing.",
+        "flow_replay": "Replay the analysis",
+        "flow_cats": "Categories",
+        "flow_s1": "The file was read",
+        "flow_s2": "{total} detectors were applied: {fired} crossed their threshold, {quiet} "
+                   "stayed below it, {na} did not apply and {failed} failed.",
+        "flow_s2_track": "The embedded sound track was analysed separately and feeds the result.",
+        "flow_s3": "Fused per category: manipulation {m}%, AI generation {a}%, provenance "
+                   "flags {p}%.",
+        "flow_s4": "The verdict follows the stronger category, {cat} at {v}%, against the marks "
+                   "at 20%, 45% and 75%.",
+        "flow_s4_dec": "Decisive provenance evidence settles the verdict without the marks.",
+        "flow_s5": "Verdict",
         # file details, children, footer
         "details": "File details",
         "details_help": "Technical properties as read by the tool.",
@@ -337,6 +355,22 @@ STRINGS: Dict[str, Dict[str, Any]] = {
         "plot_alt": "رسم بياني لـ{y} مقابل {x}، من {x0} إلى {x1}؛ والقيم بين {y0} و{y1}.",
         "plot_marks": "مواضع معلَّمة عند {list}.",
         "marked": "مواضع معلَّمة",
+        "flow": "كيف وصل التقرير إلى النتيجة",
+        "flow_help": "المسار الفعلي لهذا التحليل، مرسومًا من القياسات نفسها. سماكة خط كل كاشف "
+                     "بقدر وزنه في النتيجة: ما زاد من درجته على عتبته، مضروبًا في ثقته بهذا "
+                     "الملف. والكواشف التي بقيت دون عتبتها لا تضيف شيئًا.",
+        "flow_replay": "أعد عرض التحليل",
+        "flow_cats": "الفئات",
+        "flow_s1": "قُرئ الملف",
+        "flow_s2": "طُبّق {total} من الكواشف: تجاوز عتبتَه منها {fired}، وبقي دونها {quiet}، "
+                   "ولم ينطبق {na}، وفشل {failed}.",
+        "flow_s2_track": "حُلّل المسار الصوتي المضمَّن على حدة، ويدخل ما وُجد فيه في النتيجة.",
+        "flow_s3": "حصيلة كل فئة: التلاعب {m}%، والتوليد بالذكاء الاصطناعي {a}%، ومؤشرات المصدر "
+                   "{p}%.",
+        "flow_s4": "تتبع النتيجة الفئة الأقوى، {cat} بنسبة {v}%، مقارنةً بالعلامات 20% و45% "
+                   "و75%.",
+        "flow_s4_dec": "دليل قاطع من بيانات الملف يحسم النتيجة دون الرجوع إلى العلامات.",
+        "flow_s5": "النتيجة",
         "details": "تفاصيل الملف",
         "details_help": "الخصائص التقنية كما قرأتها الأداة.",
         "child": "المسار المضمَّن: {kind}",
@@ -901,6 +935,57 @@ white-space:nowrap;pointer-events:none;font-variant-numeric:tabular-nums;z-index
 .mkcap{font-size:12px;color:var(--ink2);margin-top:2px;text-align:left}
 .mkcap i{display:inline-block;width:14px;border-top:2px dashed var(--mark);vertical-align:middle;
 margin-right:5px}
+/* how the verdict was reached */
+.fhead{display:flex;gap:10px;align-items:baseline;justify-content:space-between;flex-wrap:wrap}
+.fscroll{overflow-x:auto;line-height:0}
+.fsvg{display:block;width:100%;min-width:760px;height:auto;line-height:normal}
+.fsvg text{fill:var(--ink);font-size:12.5px}
+.fsvg .hd{fill:var(--ink2);font-size:11px;font-weight:600;letter-spacing:.08em;
+text-transform:uppercase}
+:lang(ar) .fsvg .hd{letter-spacing:0;text-transform:none;font-size:12.5px}
+.fsvg .nm{font-weight:650}.fsvg .sm{font-size:11px;fill:var(--ink2)}
+.fsvg .n{font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+font-size:11.5px;font-variant-numeric:tabular-nums}
+.fsvg .big{font-size:17px;font-weight:700}
+.fsvg .box{fill:var(--surface);stroke:var(--line);stroke-width:1.2px}
+.fsvg .fired .box,.fsvg .cat.hot .box{stroke:var(--l3);stroke-width:2px}
+.fsvg .failed .box{stroke:var(--l2);stroke-dasharray:5 3}
+.fsvg .na .box,.fsvg .cat.prov .box{stroke-dasharray:3 3}
+.fsvg .trk{fill:var(--sunk);stroke:var(--line);stroke-width:1px}
+.fsvg .fill{fill:var(--ink2)}.fsvg .fired .fill,.fsvg .hot .fill{fill:var(--mark)}
+.fsvg .tick{stroke:var(--ink);stroke-width:1.5px;opacity:.6}
+.fsvg .s-fired{fill:var(--l3);font-weight:650}.fsvg .s-failed{fill:var(--l2);font-weight:650}
+.fsvg .s-quiet,.fsvg .s-na{fill:var(--ink2)}
+.fsvg .e{fill:none;stroke:var(--ink2);stroke-width:1px;opacity:.4}
+.fsvg .e.in{opacity:.25}
+.fsvg .e.fired,.fsvg .e.hot{stroke:var(--mark);opacity:.85}
+.fsvg .e.na{stroke-dasharray:2 4;opacity:.3}
+.fsvg .e.failed{stroke:var(--l2);stroke-dasharray:6 4;opacity:.75}
+.fsvg .e.prov{stroke-dasharray:6 4}
+.fsvg .pl{fill:none;stroke:var(--mark);stroke-linecap:round;stroke-dasharray:.04 .96;opacity:0}
+.fsvg .elab{fill:var(--l3);font-size:11px;font-weight:700;paint-order:stroke;
+stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
+.fsvg .vd .box{stroke:var(--lv);stroke-width:2.5px}
+.fsvg .vd .big{fill:var(--lv)}
+.fsvg .stp{fill:var(--sunk);stroke:var(--line);stroke-width:1px}
+.fsvg .stp.on{fill:var(--lv);stroke:var(--lv)}
+.fsvg a:hover .box{fill:var(--sunk)}
+.fsvg .nd{transition:opacity .15s}
+.fsvg:has(.nd:hover) .nd:not(:hover){opacity:.25}
+.fkey{list-style:none;display:flex;flex-wrap:wrap;gap:4px 20px;margin:10px 0 0;padding:0;
+font-size:12.5px;color:var(--ink2)}
+.fkey i{display:inline-block;width:26px;border-top:2px solid var(--ink2);vertical-align:middle;
+margin-inline-end:6px}
+.fkey .k-w{border-top:5px solid var(--mark)}.fkey .k-quiet{border-top-width:1px}
+.fkey .k-na{border-top-style:dotted}.fkey .k-failed{border-top:2px dashed var(--l2)}
+ol.fsteps{margin:14px 0 0;padding-inline-start:22px}ol.fsteps li{margin:5px 0}
+@media (prefers-reduced-motion:no-preference){
+.flow.play .an{animation:fin .5s var(--d,0s) both}
+.flow.play .pl{animation:run 1.1s var(--d,0s) 2 linear}
+.flow.play ol.fsteps li{animation:dim .5s var(--d,0s) both}
+@keyframes fin{from{opacity:0}}
+@keyframes dim{from{opacity:.25}}
+@keyframes run{from{opacity:1;stroke-dashoffset:1}to{opacity:1;stroke-dashoffset:0}}}
 /* child report, footer, lightbox */
 .child{border-inline-start:3px solid var(--line);padding-inline-start:18px;margin-top:8px}
 .child .vtext{font-size:21px}.child .vicon{width:36px;height:36px}
@@ -939,6 +1024,7 @@ max-height:none!important;background:none}
 .ov{clip-path:none}.divider{display:none!important}
 .figs figure{max-width:80mm}tr,figure,.lane{break-inside:avoid}
 pre{max-height:none}a{text-decoration:none;color:inherit}
+.fscroll{overflow:visible}.fsvg{min-width:0}.flow .an,.flow .pl,ol.fsteps li{animation:none!important}
 details.grp:not([open]){display:none}}
 """
 
@@ -1000,6 +1086,11 @@ all('svg.psvg').forEach(function(s){var pts=null,box=s.parentNode,tip=null,
   cur.setAttribute('x1',p[0]);cur.setAttribute('x2',p[0]);cur.style.display='block'});
  on(s,'pointerleave',function(){if(tip)tip.style.display='none';cur.style.display='none'});
 });
+all('.flow').forEach(function(f){var b=f.parentNode.querySelector('.replay');
+ function play(){f.classList.remove('play');void f.offsetWidth;f.classList.add('play')}
+ on(b,'click',play);
+ if(window.IntersectionObserver){var io=new IntersectionObserver(function(es){
+  if(es[0].isIntersecting){io.disconnect();play()}},{threshold:.3});io.observe(f)}});
 all('[data-print]').forEach(function(b){on(b,'click',function(){window.print()})});
 })();"""
 
@@ -1815,7 +1906,8 @@ def _detector_card(ctx: _Ctx, e: Evidence, state: str, duration: float,
     return "".join(out)
 
 
-def _evidence(ctx: _Ctx, r: Report, layer_ids: Dict[str, str]) -> str:
+def _evidence(ctx: _Ctx, r: Report, layer_ids: Dict[str, str],
+              anchors_out: Optional[Dict[int, str]] = None) -> str:
     t = ctx.t
     eid = ctx.uid("evidence")
     dur = _duration(r)
@@ -1826,6 +1918,8 @@ def _evidence(ctx: _Ctx, r: Report, layer_ids: Dict[str, str]) -> str:
     groups["quiet"].sort(key=lambda e: -(e.score * e.confidence))
     anchors = {id(e): f"{eid}-{_dom_id(e.detector)}-{i}"
                for i, e in enumerate(r.evidences)}
+    if anchors_out is not None:
+        anchors_out.update(anchors)
 
     rows = []
     for state in ("fired", "failed", "quiet", "na"):
@@ -1870,6 +1964,281 @@ def _evidence(ctx: _Ctx, r: Report, layer_ids: Dict[str, str]) -> str:
             f'{table}{"".join(blocks)}</section>')
 
 
+# --------------------------------------------------------------------------- #
+# How the verdict was reached: file -> detectors -> categories -> verdict
+# --------------------------------------------------------------------------- #
+FLOW_W = 1040
+_FLOW_COLS = {"file": (8, 176), "det": (262, 276), "cat": (622, 196), "vd": (862, 170)}
+_FLOW_CATS = ("manipulation", "ai_generation", "provenance")
+_DET_H, _DET_GAP, _CAT_H, _CAT_GAP, _TOP = 50, 10, 66, 18, 34
+_DRIVES = 0.8      # weight of a child report's category scores (fusion.finalize)
+
+
+def _fit(px: float) -> int:
+    """Characters of the bold 12.5 px node title that fit in ``px`` (a safe average)."""
+    return max(8, int(px / 7.4))
+
+
+def _trunc(s: str, n: int) -> str:
+    s = _clean(s)
+    return s if len(s) <= n else s[:n - 1].rstrip() + "…"
+
+
+class _Flow:
+    """SVG writer in left-to-right logical coordinates, mirrored for right-to-left pages,
+    so that the diagram reads in the direction of the page. Every string goes through
+    :func:`_esc`; every text element holds one script only, so bidi never reorders it."""
+
+    def __init__(self, rtl: bool):
+        self.rtl, self.out = rtl, []
+
+    def x(self, x: float) -> float:
+        return FLOW_W - x if self.rtl else x
+
+    def rect(self, x, y, w, h, cls, rx=6) -> None:
+        x0 = FLOW_W - x - w if self.rtl else x
+        self.out.append(f'<rect class="{cls}" x="{x0:.1f}" y="{y:.1f}" width="{w:.1f}" '
+                        f'height="{h:.1f}" rx="{rx}"/>')
+
+    def text(self, x, y, s, cls="", end=False) -> None:
+        """``end`` aligns to the far edge in reading order. Words run in the page's
+        direction (so "(ELA)" and "…" sit right in Arabic); numbers stay left-to-right,
+        or "+0.80" would read "0.80+"."""
+        numeric = bool({"n", "elab"} & set(cls.split()))
+        if self.rtl and not numeric:
+            anchor, extra = ("end" if end else "start"), ' direction="rtl"'
+        else:
+            anchor, extra = ("end" if end != self.rtl else "start"), ""
+        c = f' class="{cls}"' if cls else ""
+        self.out.append(f'<text{c} x="{self.x(x):.1f}" y="{y:.1f}" text-anchor="{anchor}"'
+                        f'{extra}>{_esc(s)}</text>')
+
+    def line(self, x1, y1, x2, y2, cls) -> None:
+        self.out.append(f'<line class="{cls}" x1="{self.x(x1):.1f}" y1="{y1:.1f}" '
+                        f'x2="{self.x(x2):.1f}" y2="{y2:.1f}"/>')
+
+    def bar(self, x, y, w, value, ticks=(0.5,)) -> None:
+        v = float(np.clip(value, 0.0, 1.0))
+        self.rect(x, y, w, 7, "trk", 3)
+        if w * v >= 1.0:
+            self.rect(x, y, w * v, 7, "fill", 3)
+        for tk in ticks:
+            self.line(x + w * tk, y - 3, x + w * tk, y + 10, "tick")
+
+    def edge(self, x1, y1, x2, y2, cls, width, delay, pulse=False) -> None:
+        dx = (x2 - x1) * 0.5
+        d = (f"M{self.x(x1):.1f},{y1:.1f} C{self.x(x1 + dx):.1f},{y1:.1f} "
+             f"{self.x(x2 - dx):.1f},{y2:.1f} {self.x(x2):.1f},{y2:.1f}")
+        self.out.append(f'<path class="e {cls} an" d="{d}" style="stroke-width:{width:.2f}px;'
+                        f'--d:{delay:.2f}s"/>')
+        if pulse:
+            self.out.append(f'<path class="pl" d="{d}" pathLength="1" '
+                            f'style="stroke-width:{width + 2.5:.2f}px;--d:{delay:.2f}s"/>')
+
+    def raw(self, s: str) -> None:
+        self.out.append(s)
+
+
+def _flow(ctx: _Ctx, r: Report, anchors: Dict[int, str], child_ids: List[str]) -> str:
+    """The analysis as a diagram drawn from the report itself: no number in it is made up.
+    Static SVG (readable without JavaScript and in print); the script only replays it."""
+    t = ctx.t
+    if not r.evidences and not r.children:
+        return ""
+    fid = ctx.uid("flow")
+    g = _Flow(ctx.rtl)
+    order = {c: i for i, c in enumerate(_FLOW_CATS)}
+    evs = sorted(r.evidences, key=lambda e: order.get(
+        getattr(e.category, "value", e.category), 9))
+    n = len(evs) + len(r.children)
+    det_h = n * (_DET_H + _DET_GAP) - _DET_GAP
+    cat_h = 3 * _CAT_H + 2 * _CAT_GAP
+    body_h = max(det_h, cat_h, 150)
+    height = _TOP + body_h + 14
+
+    fx, fw = _FLOW_COLS["file"]
+    dx, dw = _FLOW_COLS["det"]
+    cx, cw = _FLOW_COLS["cat"]
+    vx, vw = _FLOW_COLS["vd"]
+    for (x, w), label in ((_FLOW_COLS["file"], t("file")), (_FLOW_COLS["det"], t("col_detector")),
+                          (_FLOW_COLS["cat"], t("flow_cats")), (_FLOW_COLS["vd"], t("verdict"))):
+        g.text(x + 2, 16, label, "hd")
+
+    # category and verdict geometry first: the edges need their anchor points
+    cy0 = _TOP + (body_h - cat_h) / 2
+    cat_y = {c: cy0 + i * (_CAT_H + _CAT_GAP) for i, c in enumerate(_FLOW_CATS)}
+    scores = {c: float(r.scores.get(c, 0.0) or 0.0) for c in _FLOW_CATS}
+    level = int(r.verdict_level)
+    decisive = any(e.decisive and e.score >= 0.9 and not e.error for e in r.evidences)
+    top_cat = "ai_generation" if scores["ai_generation"] >= scores["manipulation"] \
+        else "manipulation"
+    vh = 150
+    vy = _TOP + (body_h - vh) / 2
+    file_h = 96
+    file_y = _TOP + (body_h - file_h) / 2
+
+    # incoming edges per category, so they spread over the category's left side
+    feeds: Dict[str, List[Tuple[float, str, float, str]]] = {c: [] for c in _FLOW_CATS}
+    rows: List[Tuple[str, Any]] = [("ev", e) for e in evs] + [("child", c) for c in r.children]
+
+    groups = []
+    for i, (kind, item) in enumerate(rows):
+        y = _TOP + i * (_DET_H + _DET_GAP)
+        mid = y + _DET_H / 2
+        ny = file_y + 16 + (file_h - 32) * (i / max(1, n - 1) if n > 1 else 0.5)
+        d_node = 0.6 + i * 0.05
+        d_out = 1.3 + i * 0.04
+        sub = _Flow(ctx.rtl)
+        sub.edge(fx + fw, ny, dx, mid, "in", 1.0, 0.35 + i * 0.03)
+        if kind == "ev":
+            e = item
+            state = _state(e)
+            w = _weight(e) if state == "fired" else 0.0
+            cat = getattr(e.category, "value", e.category)
+            if cat in feeds:
+                feeds[cat].append((mid, state, w, f"{d_out:.2f}"))
+            href = anchors.get(id(e))
+            name = ctx.detector_name(e)[0]
+            link_open = (f'<a href="#{href}" tabindex="-1">' if href else "<g>")
+            link_close = "</a>" if href else "</g>"
+            sub.raw(f'<g class="an" style="--d:{d_node:.2f}s">{link_open}')
+            sub.rect(dx, y, dw, _DET_H, "box")
+            label = _trunc(t("decisive") if e.decisive and state == "fired"
+                           else t("state")[state], 16)
+            sub.text(dx + 10, y + 19, _trunc(name, _fit(dw - 30 - 6.2 * len(label))), "nm")
+            sub.text(dx + dw - 10, y + 19, label, f"s-{state} sm", end=True)
+            if state in ("fired", "quiet"):
+                sub.bar(dx + 10, y + 31, 112, e.score)
+                sub.text(dx + 130, y + 38.5, _score(e.score), "n")
+                sub.text(dx + dw - 10, y + 38.5, f"{e.confidence:.2f}", "n", end=True)
+                sub.text(dx + dw - 46, y + 38.5, t("col_conf"), "sm", end=True)
+            else:
+                sub.text(dx + 10, y + 38.5, _trunc(t("state_help")[state], 44), "sm")
+            sub.raw(f"{link_close}</g>")
+            groups.append((f"nd {state}", sub, y))
+        else:
+            c = item
+            cs = {k: float(c.scores.get(k, 0.0) or 0.0) for k in _FLOW_CATS}
+            lv = int(c.verdict_level)
+            state = "fired" if lv >= 2 else "quiet"
+            for k in ("manipulation", "ai_generation"):
+                w = _DRIVES * cs[k]
+                feeds[k].append((mid, "fired" if w >= 0.1 else "quiet", w, f"{d_out:.2f}"))
+            kind_name = t("media").get(c.media_type, c.media_type)
+            name = t("child", kind=kind_name.lower() if ctx.lang == "en" else kind_name)
+            href = child_ids[i - len(evs)] if i - len(evs) < len(child_ids) else ""
+            sub.raw(f'<g class="an" style="--d:{d_node:.2f}s">'
+                    + (f'<a href="#{href}" tabindex="-1">' if href else "<g>"))
+            sub.rect(dx, y, dw, _DET_H, "box")
+            label = _trunc(t("steps")[max(0, min(4, lv))], 20)
+            sub.text(dx + 10, y + 19, _trunc(name, _fit(dw - 30 - 6.2 * len(label))), "nm")
+            sub.text(dx + dw - 10, y + 19, label, f"s-{state} sm", end=True)
+            top = max(cs["manipulation"], cs["ai_generation"])
+            sub.bar(dx + 10, y + 31, 112, top, ticks=(0.2, 0.45, 0.75))
+            sub.text(dx + 130, y + 38.5, f"{top * 100:.0f}%", "n")
+            sub.raw("</a>" if href else "</g>")
+            sub.raw("</g>")
+            groups.append((f"nd {state}", sub, y))
+
+    # detector -> category edges belong to the detector's group (hover isolates them)
+    gi = 0
+    for kind, item in rows:
+        cls, sub, y = groups[gi]
+        mid = y + _DET_H / 2
+        cats = ([getattr(item.category, "value", item.category)] if kind == "ev"
+                else ["manipulation", "ai_generation"])
+        for cat in cats:
+            if cat not in feeds:
+                continue
+            ins = feeds[cat]
+            j = next(k for k, f in enumerate(ins) if f[0] == mid)
+            _, state, w, delay = ins[j]
+            ty = cat_y[cat] + 12 + (_CAT_H - 24) * ((j + 0.5) / len(ins))
+            width = 1.4 + 7.0 * w if w > 0 else 1.0
+            sub.edge(dx + dw, mid, cx, ty, state, width, float(delay),
+                     pulse=state == "fired" and w > 0)
+            if w >= 0.005:
+                sub.raw(f'<g class="an" style="--d:{delay}s">')
+                sub.text(dx + dw + 8, mid - 6, f"+{w:.2f}", "elab")
+                sub.raw("</g>")
+        gi += 1
+
+    for cls, sub, _ in groups:
+        g.raw(f'<g class="{cls}">' + "".join(sub.out) + "</g>")
+
+    # categories
+    for i, cat in enumerate(_FLOW_CATS):
+        y = cat_y[cat]
+        v = scores[cat]
+        hot = cat == top_cat and level >= 1 and v >= 0.2 and not decisive
+        cls = "cat" + (" hot" if hot else "") + (" prov" if cat == "provenance" else "")
+        g.raw(f'<g class="{cls} an" style="--d:1.9s">')
+        g.rect(cx, y, cw, _CAT_H, "box")
+        g.text(cx + 10, y + 20, _trunc(t("cat_score")[cat], 26), "nm")
+        g.text(cx + cw - 10, y + 44, f"{v * 100:.0f}%", "big n", end=True)
+        g.bar(cx + 10, y + 46, cw - 70, v, ticks=(0.2, 0.45, 0.75))
+        g.raw("</g>")
+        ecls = "hot" if hot else ("prov" if cat == "provenance" else "")
+        ty = vy + 40 + i * 30
+        g.edge(cx + cw, y + _CAT_H / 2, vx, ty, ecls, 1.4 + 6.0 * v if v > 0 else 1.0,
+               2.3, pulse=hot)
+
+    # the file
+    g.raw('<g class="an" style="--d:0s">')
+    g.rect(fx, file_y, fw, file_h, "box")
+    g.text(fx + 10, file_y + 22, t("media").get(r.media_type, r.media_type), "nm")
+    g.text(fx + 10, file_y + 44, _trunc(os.path.basename(str(r.path)) or str(r.path), 24), "sm")
+    g.text(fx + 10, file_y + 72, t("col_detector"), "sm")
+    g.text(fx + fw - 10, file_y + 72, str(len(r.evidences)), "n", end=True)
+    g.raw("</g>")
+
+    # the verdict and its five-step scale
+    vk = f"lv{max(0, min(4, level))}"
+    g.raw(f'<g class="vd {vk} an" style="--d:2.7s">')
+    g.rect(vx, vy, vw, vh, "box")
+    g.text(vx + 12, vy + 24, t("verdict"), "hd")
+    g.text(vx + 12, vy + 58, _trunc(t("steps")[max(0, min(4, level))], 20), "big")
+    sw = (vw - 24 - 4 * 4) / 5
+    for k in range(5):
+        g.rect(vx + 12 + k * (sw + 4), vy + 80, sw, 10, "stp on" if k == level else "stp", 2)
+    g.text(vx + 12, vy + 116, t("cat_score")[top_cat] if not decisive else t("decisive"),
+           "sm")
+    g.text(vx + vw - 12, vy + 136, f"{scores[top_cat] * 100:.0f}%" if not decisive else "",
+           "n", end=True)
+    g.raw("</g>")
+
+    svg = (f'<svg class="fsvg" viewBox="0 0 {FLOW_W} {height:.0f}" aria-hidden="true" '
+           f'focusable="false" preserveAspectRatio="xMidYMin meet">{"".join(g.out)}</svg>')
+
+    # the same path in words: the text alternative, and the chapters of the replay
+    st = {k: 0 for k in ("fired", "quiet", "na", "failed")}
+    for e in r.evidences:
+        st[_state(e)] += 1
+    name = os.path.basename(str(r.path)) or str(r.path)
+    steps = [
+        (0.0, f'{_esc(t("flow_s1"))}: {_ltr(name)}'),
+        (0.6, _esc(t("flow_s2", total=len(r.evidences), **st))
+         + (" " + _esc(t("flow_s2_track")) if r.children else "")),
+        (1.3, _esc(t("flow_s3", m=f"{scores['manipulation'] * 100:.0f}",
+                     a=f"{scores['ai_generation'] * 100:.0f}",
+                     p=f"{scores['provenance'] * 100:.0f}"))),
+        (2.1, _esc(t("flow_s4_dec") if decisive else
+                   t("flow_s4", cat=t("cat_score")[top_cat], v=f"{scores[top_cat] * 100:.0f}"))),
+        (2.7, f'<b>{_esc(t("flow_s5"))}:</b> {_esc(t("v")[_verdict_key(r)][0] or r.verdict)}'),
+    ]
+    items = "".join(f'<li style="--d:{d:.1f}s">{s}</li>' for d, s in steps)
+    key = (f'<ul class="fkey"><li><i class="k-w"></i>{_esc(t("weight"))}</li>'
+           f'<li><i class="k-quiet"></i>{_esc(t("state")["quiet"])}</li>'
+           f'<li><i class="k-na"></i>{_esc(t("state")["na"])}</li>'
+           f'<li><i class="k-failed"></i>{_esc(t("state")["failed"])}</li></ul>')
+    return (f'<section id="{fid}" aria-labelledby="{fid}-h"><div class="fhead">'
+            f'<{ctx.h(2)} id="{fid}-h">{_esc(t("flow"))}</{ctx.h(2)}>'
+            f'<button type="button" class="btn js-only replay">{_esc(t("flow_replay"))}</button>'
+            f'</div><p class="lead">{_esc(t("flow_help"))}</p>'
+            f'<div class="card flow"><div class="fscroll" dir="ltr">{svg}</div>{key}'
+            f'<ol class="fsteps">{items}</ol></div></section>')
+
+
 def _file_details(ctx: _Ctx, r: Report) -> str:
     t = ctx.t
     rows = []
@@ -1902,19 +2271,22 @@ def _body(ctx: _Ctx, r: Report, toc: List[Tuple[str, str]]) -> str:
     layer_ids: Dict[str, str] = {}
     viewer = _viewer(ctx, r, layer_ids)
     timeline = _timeline(ctx, r)
-    evidence = _evidence(ctx, r, layer_ids)
+    anchors: Dict[int, str] = {}
+    evidence = _evidence(ctx, r, layer_ids, anchors)
+    child_ids = [ctx.uid("track") for _ in r.children]
+    flow = _flow(ctx, r, anchors, child_ids) if ctx.depth == 0 else ""
     details = _file_details(ctx, r)
     if ctx.depth == 0:
         toc.append((anchor, t("verdict")))
         for chunk, label in ((viewer, t("where_video") if r.media_type == "video"
                               else t("where_image")), (timeline, t("timeline")),
-                             (evidence, t("evidence")), (details, t("details"))):
+                             (flow, t("flow")), (evidence, t("evidence")),
+                             (details, t("details"))):
             m = re.match(r'<section id="([^"]+)"', chunk)
             if m:
                 toc.append((m.group(1), label))
-    out = [_verdict(ctx, r, anchor), viewer, timeline, evidence, details]
-    for c in r.children:
-        cid = ctx.uid("track")
+    out = [_verdict(ctx, r, anchor), viewer, timeline, flow, evidence, details]
+    for c, cid in zip(r.children, child_ids):
         kind = t("media").get(c.media_type, c.media_type)
         title = t("child", kind=kind.lower() if ctx.lang == "en" else kind)
         toc.append((cid, title))
