@@ -327,6 +327,8 @@ def test_flow_replay_is_wired_and_reading_order_follows_the_language(real):
     assert 'direction="rtl"' not in en and 'direction="rtl"' in ar
     # numbers stay left-to-right inside the Arabic diagram ("+0.80", never "0.80+")
     assert not re.search(r'<text class="(n|big n|elab)"[^>]*direction="rtl"', ar)
+    name = RH._esc(os.path.basename(real["video"].path))
+    assert re.search(r'<text class="sm" [^>]*text-anchor="end">' + re.escape(name), ar)
     # the diagram is mirrored, not merely translated: the file column is on the right
     x_en = float(re.search(r'<g class="an" style="--d:0s"><rect class="box" x="([\d.]+)"',
                            en).group(1))

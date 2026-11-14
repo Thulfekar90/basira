@@ -2000,12 +2000,12 @@ class _Flow:
         self.out.append(f'<rect class="{cls}" x="{x0:.1f}" y="{y:.1f}" width="{w:.1f}" '
                         f'height="{h:.1f}" rx="{rx}"/>')
 
-    def text(self, x, y, s, cls="", end=False) -> None:
+    def text(self, x, y, s, cls="", end=False, ltr=False) -> None:
         """``end`` aligns to the far edge in reading order. Words run in the page's
-        direction (so "(ELA)" and "…" sit right in Arabic); numbers stay left-to-right,
-        or "+0.80" would read "0.80+"."""
-        numeric = bool({"n", "elab"} & set(cls.split()))
-        if self.rtl and not numeric:
+        direction (so "(ELA)" and "…" sit right in Arabic); numbers and file names stay
+        left-to-right, or "+0.80" would read "0.80+" and "001_F.png" "F.png_001"."""
+        ltr = ltr or bool({"n", "elab"} & set(cls.split()))
+        if self.rtl and not ltr:
             anchor, extra = ("end" if end else "start"), ' direction="rtl"'
         else:
             anchor, extra = ("end" if end != self.rtl else "start"), ""
@@ -2187,7 +2187,8 @@ def _flow(ctx: _Ctx, r: Report, anchors: Dict[int, str], child_ids: List[str]) -
     g.raw('<g class="an" style="--d:0s">')
     g.rect(fx, file_y, fw, file_h, "box")
     g.text(fx + 10, file_y + 22, t("media").get(r.media_type, r.media_type), "nm")
-    g.text(fx + 10, file_y + 44, _trunc(os.path.basename(str(r.path)) or str(r.path), 24), "sm")
+    g.text(fx + 10, file_y + 44, _trunc(os.path.basename(str(r.path)) or str(r.path), 24), "sm",
+           ltr=True)
     g.text(fx + 10, file_y + 72, t("col_detector"), "sm")
     g.text(fx + fw - 10, file_y + 72, str(len(r.evidences)), "n", end=True)
     g.raw("</g>")
