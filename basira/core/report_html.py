@@ -85,14 +85,14 @@ STRINGS: Dict[str, Dict[str, Any]] = {
         # verdict
         "verdict": "Verdict",
         "scale": "Position on Basira's five-step scale",
-        "steps": ["No traces", "Inconclusive", "Suspicious", "Likely", "Provenance evidence"],
+        "steps": ["No traces", "Inconclusive", "Suspicious", "Likely", "Verified origin (reserved)"],
         "means": "What this means",
         "not_means": "What it does not mean",
         "scores": "Category scores",
         "scores_help": "Fused evidence per category. The marks show where the verdict changes: "
                        "20% inconclusive, 45% suspicious, 75% likely.",
         "prov_help": "Provenance flags describe the file's history. On their own they never "
-                     "raise the verdict above “inconclusive” unless the metadata is decisive.",
+                     "raise the verdict above “inconclusive”. Unsigned AI declarations are strong leads, never verified origin.",
         "cat": {"manipulation": "Manipulation", "ai_generation": "AI generation",
                 "provenance": "Provenance"},
         "cat_score": {"manipulation": "Manipulation", "ai_generation": "AI generation",
@@ -158,7 +158,7 @@ STRINGS: Dict[str, Dict[str, Any]] = {
             "failed": "crashed or could not run, so their silence means nothing"},
         "score": "Score", "confidence": "Confidence", "weight": "Weight in the verdict",
         "threshold": "threshold",
-        "decisive": "Decisive",
+        "decisive": "Unverified declaration",
         "low_conf": "low confidence on this file",
         "measures": "Measures",
         "blind": "Blind spot",
@@ -187,7 +187,7 @@ STRINGS: Dict[str, Dict[str, Any]] = {
                    "flags {p}%.",
         "flow_s4": "The verdict follows the stronger category, {cat} at {v}%, against the marks "
                    "at 20%, 45% and 75%.",
-        "flow_s4_dec": "Decisive provenance evidence settles the verdict without the marks.",
+        "flow_s4_dec": "Verified provenance requires a signature verifier, which is not implemented.",
         "flow_s5": "Verdict",
         # file details, children, footer
         "details": "File details",
@@ -233,25 +233,23 @@ STRINGS: Dict[str, Dict[str, Any]] = {
                          "It is not proof, and it says nothing about who changed the file, why, "
                          "or whether the change misleads. A legitimate edit leaves the same "
                          "traces."),
+            "v3_metadata": (None,
+                            "Metadata declares AI generation, but its author and origin have not been verified.",
+                            "Anyone can insert or remove these tags. This is a strong lead, not proof about the pixels or samples."),
+            "v1_empty": (None, "The file contains no analysable content.",
+                         "No conclusion about clean content can be drawn."),
             "v3_ai": (None,
                       "Strong or mutually reinforcing traces consistent with synthetic content "
                       "were measured.",
                       "It is not proof. Without provenance data this is the weakest question "
                       "Basira answers: upsampled, transcoded or noise-gated material can "
                       "produce the same cues."),
-            "v4_ai": (None,
-                      "The file itself carries metadata written by an AI generator, or an AI "
-                      "label (C2PA / IPTC). The verdict rests on that statement, not on a "
-                      "measurement of the content.",
-                      "It does not show how much of the content is synthetic. Metadata can be "
-                      "removed, or written into a file by anyone: treat it as a strong lead "
-                      "about origin."),
-            "v4_edit": (None,
-                        "The file itself carries decisive metadata about how it was produced. "
-                        "The verdict rests on that statement, not on a measurement of the "
-                        "content.",
-                        "It does not show what was changed. Metadata can be removed, or written "
-                        "into a file by anyone: treat it as a strong lead about origin."),
+            "v4_ai": ("Reserved: verified provenance (not implemented)",
+                      "Level 4 requires a verified signature and an explicit trust policy. Basira has no verifier yet.",
+                      "Unsigned metadata and a C2PA text marker do not qualify as verified provenance."),
+            "v4_edit": ("Reserved: verified provenance (not implemented)",
+                        "Level 4 requires a verified signature and an explicit trust policy. Basira has no verifier yet.",
+                        "A signature would not, by itself, prove that every depicted event is true."),
         },
         # sentences written by the fusion step (English only); translated where known
         "fusion": {},
@@ -272,14 +270,13 @@ STRINGS: Dict[str, Dict[str, Any]] = {
         "media": {"image": "صورة", "audio": "صوت", "video": "فيديو"},
         "verdict": "النتيجة",
         "scale": "موقع النتيجة على سلّم بصيرة ذي الدرجات الخمس",
-        "steps": ["لا آثار", "غير حاسم", "مثير للشك", "مرجَّح", "دليل من بيانات الملف"],
+        "steps": ["لا آثار", "غير حاسم", "مثير للشك", "مرجَّح", "منشأ متحقق (محجوز)"],
         "means": "ماذا تعني هذه النتيجة",
         "not_means": "ما الذي لا تعنيه",
         "scores": "درجات الفئات",
         "scores_help": "حصيلة الأدلة في كل فئة. العلامات تبيّن أين تتغيّر النتيجة: 20% غير حاسم، "
                        "45% مثير للشك، 75% مرجَّح.",
-        "prov_help": "مؤشرات المصدر تصف تاريخ الملف. وهي وحدها لا ترفع النتيجة فوق «غير حاسم» "
-                     "ما لم تكن البيانات الوصفية قاطعة.",
+        "prov_help": "مؤشرات المصدر تصف تاريخ الملف. وهي وحدها لا ترفع النتيجة فوق «غير حاسم».",
         "cat": {"manipulation": "تلاعب", "ai_generation": "توليد بالذكاء الاصطناعي",
                 "provenance": "المصدر"},
         "cat_score": {"manipulation": "التلاعب", "ai_generation": "التوليد بالذكاء الاصطناعي",
@@ -342,7 +339,7 @@ STRINGS: Dict[str, Dict[str, Any]] = {
             "failed": "تعطّلت أو لم تتمكن من العمل، فسكوتها لا يعني شيئًا"},
         "score": "الدرجة", "confidence": "الثقة", "weight": "الوزن في النتيجة",
         "threshold": "العتبة",
-        "decisive": "قاطع",
+        "decisive": "تصريح غير متحقق منه",
         "low_conf": "ثقة منخفضة في هذا الملف",
         "measures": "ما يقيسه",
         "blind": "ما لا يراه",
@@ -369,7 +366,7 @@ STRINGS: Dict[str, Dict[str, Any]] = {
                    "{p}%.",
         "flow_s4": "تتبع النتيجة الفئة الأقوى، {cat} بنسبة {v}%، مقارنةً بالعلامات 20% و45% "
                    "و75%.",
-        "flow_s4_dec": "دليل قاطع من بيانات الملف يحسم النتيجة دون الرجوع إلى العلامات.",
+        "flow_s4_dec": "دليل المنشأ المتحقق يحتاج فاحص توقيع، وهو غير منفّذ.",
         "flow_s5": "النتيجة",
         "details": "تفاصيل الملف",
         "details_help": "الخصائص التقنية كما قرأتها الأداة.",
@@ -407,23 +404,26 @@ STRINGS: Dict[str, Dict[str, Any]] = {
                          "أو المقاطع المحدَّدة تبيّن موضعها.",
                          "ليست برهانًا، ولا تقول شيئًا عمّن غيّر الملف ولا عن سبب ذلك ولا عمّا إذا "
                          "كان التغيير مضلِّلًا. فالتعديل المشروع يترك الآثار نفسها."),
+            "v3_metadata": ("البيانات الوصفية تصرّح بأنه مولّد بالذكاء الاصطناعي (غير متحقق منه)",
+                            "لم يُتحقق من كاتب الوسم أو منشأ الملف.",
+                            "يمكن لأي شخص زرع هذه الوسوم أو حذفها؛ إنها قرينة قوية وليست برهاناً على البكسلات أو العينات."),
+            "v1_empty": ("لا يوجد محتوى قابل للتحليل", "الملف لا يحتوي على محتوى يمكن تحليله.",
+                         "لا يمكن استنتاج سلامة محتوى غير موجود."),
             "v3_ai": ("يُرجَّح أنه مولَّد بالذكاء الاصطناعي",
                       "قيست آثار قوية، أو آثار يعضد بعضها بعضًا، تتوافق مع محتوى اصطناعي.",
                       "ليست برهانًا. ففي غياب بيانات المصدر يكون هذا أضعف سؤال تجيب عنه بصيرة: "
                       "المواد التي رُفع معدل عيّناتها أو أُعيد ترميزها أو عولجت ببوابة ضجيج قد "
                       "تعطي القرائن نفسها."),
-            "v4_ai": ("مولَّد بالذكاء الاصطناعي (بدليل من بيانات الملف)",
-                      "الملف نفسه يحمل بيانات وصفية كتبها مولِّد ذكاء اصطناعي، أو وسمًا يصرّح "
-                      "بذلك (C2PA / IPTC). فالنتيجة تستند إلى هذا التصريح لا إلى قياس للمحتوى.",
-                      "لا تبيّن مقدار ما هو اصطناعي من المحتوى. والبيانات الوصفية يمكن حذفها، "
-                      "ويمكن لأي شخص أن يكتبها في ملف: فهي خيط قوي عن المنشأ لا أكثر."),
-            "v4_edit": ("معدَّل (بدليل من بيانات الملف)",
-                        "الملف نفسه يحمل بيانات وصفية قاطعة عن طريقة إنتاجه. فالنتيجة تستند إلى "
-                        "هذا التصريح لا إلى قياس للمحتوى.",
-                        "لا تبيّن ما الذي تغيّر. والبيانات الوصفية يمكن حذفها، ويمكن لأي شخص أن "
-                        "يكتبها في ملف: فهي خيط قوي عن المنشأ لا أكثر."),
+            "v4_ai": ("محجوز لدليل منشأ متحقق منه (غير منفّذ)",
+                      "يتطلب المستوى 4 توقيعاً متحققاً منه وسياسة ثقة واضحة؛ بصيرة لا تنفّذ هذا التحقق حالياً.",
+                      "الوسم غير الموقّع أو ذكر C2PA نصياً لا يثبت المنشأ."),
+            "v4_edit": ("محجوز لدليل منشأ متحقق منه (غير منفّذ)",
+                        "يتطلب المستوى 4 توقيعاً متحققاً منه وسياسة ثقة واضحة؛ بصيرة لا تنفّذ هذا التحقق حالياً.",
+                        "التوقيع وحده لا يثبت صدق كل ما يصوّره المحتوى."),
         },
         "fusion": {
+            "The file contains no analysable content; no clean-content conclusion is possible.":
+                "الملف لا يحتوي على محتوى قابل للتحليل؛ لا يمكن استنتاج سلامته.",
             "No detector exceeded its threshold. This is not proof of authenticity: skilled "
             "edits and strong re-compression can erase the traces these detectors rely on.":
                 "لم يتجاوز أي كاشف عتبته. وهذا ليس دليلًا على الأصالة: فالتعديل المتقن وإعادة "
@@ -455,13 +455,13 @@ DETECTORS: Dict[str, Dict[str, Tuple[str, ...]]] = {
     "image.jpeg_trace": {
         "en": ("Finds the quantisation steps of an earlier JPEG save that are still present in "
                "the pixels, and maps the blocks whose DCT coefficients do not sit on them.",
-               "Runs on losslessly stored images (TIFF, PNG, BMP) that were a JPEG once and were "
+               "Runs on known lossless encodings (non-JPEG TIFF, PNG, BMP, lossless WEBP) that were a JPEG once and were "
                "not resized or filtered since; it cannot see content pasted from a JPEG of the "
                "same quality on the same 8×8 grid."),
         "ar": ("خريطة أثر حفظ JPEG سابق",
                "يستخرج خطوات التكميم التي تركها حفظ سابق بصيغة JPEG وما زالت في البكسلات، "
                "ويحدّد المربعات التي لا تقع معاملات DCT فيها على تلك الخطوات.",
-               "يعمل على الصور المحفوظة بلا ضغط (TIFF وPNG وBMP) التي كانت JPEG يوماً ولم يُغيَّر "
+               "يعمل على ترميز غير فاقد معروف (TIFF بلا JPEG وPNG وBMP وWEBP غير الفاقد) كان JPEG يوماً ولم يُغيَّر "
                "حجمها أو تُرشَّح بعد ذلك، ولا يرى محتوى مُلصقاً من JPEG بالجودة نفسها وعلى شبكة "
                "8×8 نفسها.")},
     "image.copymove": {
@@ -697,7 +697,11 @@ DETECTORS: Dict[str, Dict[str, Tuple[str, ...]]] = {
                "إذا فشل فمعناه أن المسار الصوتي لم يُفحص.")},
 }
 
+DETECTORS["video.frame_copymove.failures"] = DETECTORS["video.frame_copymove"]
+
 VERDICT_KEYS = {
+    "Metadata declares AI generation (unverified)": "v3_metadata",
+    "No content to analyse": "v1_empty",
     "No significant traces found": "v0",
     "Inconclusive (weak anomalies)": "v1",
     "Inconclusive (content could not be analysed)": "v1_unreadable",
@@ -1843,7 +1847,7 @@ def _detector_card(ctx: _Ctx, e: Evidence, state: str, duration: float,
     head.append(f'<span class="st {state}">{_esc(t("state")[state])}</span>')
     head.append(f'<span class="chip">{_esc(t("cat").get(e.category.value, e.category.value))}'
                 f'</span>')
-    if e.decisive and state == "fired":
+    if e.details.get("unverified_generator_claim") and state == "fired":
         head.append(f'<span class="chip dec">{_esc(t("decisive"))}</span>')
     if state == "quiet" and e.confidence < 0.2:
         head.append(f'<span class="chip">{_esc(t("low_conf"))}</span>')
@@ -2081,7 +2085,7 @@ def _flow(ctx: _Ctx, r: Report, anchors: Dict[int, str], child_ids: List[str]) -
     cat_y = {c: cy0 + i * (_CAT_H + _CAT_GAP) for i, c in enumerate(_FLOW_CATS)}
     scores = {c: float(r.scores.get(c, 0.0) or 0.0) for c in _FLOW_CATS}
     level = int(r.verdict_level)
-    decisive = any(e.decisive and e.score >= 0.9 and not e.error for e in r.evidences)
+    decisive = False  # no signature verifier; unsigned claims follow normal category fusion
     top_cat = "ai_generation" if scores["ai_generation"] >= scores["manipulation"] \
         else "manipulation"
     vh = 150

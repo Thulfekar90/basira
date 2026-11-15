@@ -23,10 +23,28 @@ def _keyframe_evidence(fs: FrameScan) -> List[Evidence]:
 
     per: dict = {}
     for fi, rgb in fs.keyframes:
-        for e in analyze_frame(rgb, f"frame {fi}", detectors=set(KEYFRAME_DETECTORS)):
+        try:
+            frame_evs = analyze_frame(rgb, f"frame {fi}", detectors=set(KEYFRAME_DETECTORS))
+        except Exception as err:
+            frame_evs = [Evidence.failed(det, "Key-frame analysis", Category.MANIPULATION, err)
+                         for det in KEYFRAME_DETECTORS]
+        for e in frame_evs:
             per.setdefault(e.detector, []).append((fi, e))
     out = []
     for det, items in per.items():
+        failed = [(fi, e) for fi, e in items if e.error is not None]
+        if failed:
+            # Keep errors separate from the successful-frame aggregate: failures
+            # must remain visible without erasing valid evidence or changing weights.
+            out.append(Evidence(
+                detector=det.replace("image.", "video.frame_") + ".failures",
+                title=failed[0][1].title + " — key-frame failures",
+                category=failed[0][1].category, score=0.0, confidence=0.0,
+                summary=f"Analysis failed in {len(failed)} of {len(items)} key frames.",
+                error="; ".join(f"frame {fi}: {e.error}" for fi, e in failed),
+                details={"frames_attempted": len(items), "frames_failed": len(failed),
+                         "frames_succeeded": len(items) - len(failed),
+                         "failed_frames": {str(fi): e.error for fi, e in failed}}))
         good = [(fi, e) for fi, e in items if e.error is None and e.confidence > 0]
         if not good:
             continue

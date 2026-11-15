@@ -49,16 +49,23 @@ report as well.
 | Level | Verdict text | Meaning |
 |---|---|---|
 | 0 | No significant traces found | no detector exceeded its threshold. **Not** a statement that the file is authentic |
-| 1 | Inconclusive (...) | weak anomalies, or part of the analysis failed (see `info.detectors_failed`) |
+| 1 | Inconclusive (...) / No content to analyse | weak anomalies, incomplete analysis (see `info.detectors_failed`), or an empty audio input (`info.content_empty`) |
 | 2 | Suspicious | the strongest category score is at least 0.45 |
-| 3 | Likely manipulated / Likely AI-generated | the strongest category score is at least 0.75 |
-| 4 | Edited / AI-generated (provenance evidence) | decisive evidence, e.g. a generator's own metadata |
+| 3 | Likely manipulated / Likely AI-generated / Metadata declares AI generation (unverified) | the strongest category score is at least 0.75; strong unsigned generator metadata is a lead, not proof |
+| 4 | Reserved for verified provenance | requires cryptographic signature verification and a trust policy; not implemented, so current engines do not produce this level |
 
 **`scores`**. `manipulation` (local edits: splicing, cloning, cuts), `ai_generation`
 (synthetic content) and `provenance` (metadata) are each fused from the detectors of that
 category: only the part of a detector's score above 0.5 counts, weighted by its
 confidence. `overall` combines the three but does not drive the verdict; the verdict
-follows the stronger of `manipulation` and `ai_generation`.
+follows the stronger of `manipulation` and `ai_generation`. These are evidence scores,
+not calibrated probabilities. Unsigned generator claims use the same fusion; the
+legacy `decisive` flag neither sets a category directly nor enables level 4.
+
+When a strong unsigned generator claim accompanies an AI-driven level-3 result, the
+English verdict is `Metadata declares AI generation (unverified)`. The Arabic HTML
+report displays «البيانات الوصفية تصرّح بأنه مولّد بالذكاء الاصطناعي (غير متحقق منه)».
+JSON verdict text remains English; do not parse its wording as a stable identifier.
 
 **`info`**. Two keys are always present and are part of the stable layout:
 
@@ -73,7 +80,7 @@ They are informational: read them defensively (`info.get(...)`).
 | Media type | Keys in 0.1.0 |
 |---|---|
 | image | `format`, `width`, `height`, `jpeg_quality` (estimate, or null), `jpeg_standard_table`, `subsampling`, `has_alpha`, `bytes`, `notes` (only when the decoder had something to say, e.g. a truncated file) |
-| audio | `duration` (s), `sample_rate`, `channels`, `frames`, `source`, `format`, `format_info`, `subtype`, `subtype_info`, `lossy`, `peak_dbfs`, `rms_dbfs`, `clipped_fraction`, `file_size`; `label` on a video's sound track |
+| audio | `duration` (s), `sample_rate`, `channels`, `frames`, `source`, `format`, `format_info`, `subtype`, `subtype_info`, `lossy`, `peak_dbfs`, `rms_dbfs`, `clipped_fraction`, `file_size`; `label` on a video's sound track; `content_empty: true` when no samples are available to analyse |
 | video | `bytes`, `encoder`, `container_codec`, `streams`, `width`, `height`, `fps`, `frames`, `duration` (s), `codec`, `analysed_every_nth_frame`, `analysed_seconds`, `truncated` |
 
 ## Evidence objects
@@ -88,7 +95,7 @@ One per detector. A detector that had nothing to say is still listed, with a low
 | `score` | number 0–1 | how anomalous the file is for this detector; **0.5 is the detector's own decision threshold** |
 | `confidence` | number 0–1 | how far this detector can be trusted on *this* file. 0 means it did not apply (wrong format, too small, no signal) |
 | `summary` | string | one or two plain-language sentences |
-| `decisive` | boolean | true for hard evidence such as a generator's own metadata |
+| `decisive` | boolean | retained for schema compatibility; unsigned metadata is false, and this field alone never proves provenance or enables level 4 |
 | `details` | object | the raw measurements and thresholds behind the score. Keys differ per detector and per version |
 | `segments` | array of [segment](#segments-and-regions) | time ranges this detector flagged |
 | `regions` | array of [region](#segments-and-regions) | boxes this detector flagged |
@@ -96,6 +103,22 @@ One per detector. A detector that had nothing to say is still listed, with a low
 | `error` | string or null | set when the detector crashed on this file; `score` and `confidence` are then 0 |
 
 "Fired" means `score >= 0.5` with `confidence > 0` and `error == null`.
+
+Strong unsigned generator declarations carry `details.unverified_generator_claim: true`.
+That is an informational flag, not evidence that the author or signature was verified.
+No signature-verification result is currently implemented.
+
+A failed key-frame detector remains visible as a separate error evidence item, currently
+`video.frame_copymove.failures`, with zero score and confidence. Its details include
+`frames_attempted`, `frames_failed`, `frames_succeeded` and `failed_frames`. Successful
+frames can still contribute their own aggregate evidence; a failure increments
+`info.detectors_failed` and prevents a silently clean level-0 verdict. The counter counts
+failed evidence items, not the number of failed frames.
+
+An empty decoded audio input returns a not-applicable evidence item and the level-1
+verdict `No content to analyse`, with `info.content_empty: true`. This also applies to
+the direct audio API supplied with an empty sample array. It is distinct from a zero-byte
+file rejected by input sniffing, and from a nonempty recording of silence.
 
 Inside `details`, values are plain JSON: numbers are rounded to 6 decimals, a value that
 was not finite is `null`, arrays longer than 256 elements are replaced by a string such as

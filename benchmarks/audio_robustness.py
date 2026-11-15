@@ -296,11 +296,15 @@ def _encoders() -> str:
     exe = ffmpeg_exe()
     if not exe:
         return ""
-    return subprocess.run([exe, "-hide_banner", "-encoders"], capture_output=True, text=True,
-                          timeout=60).stdout
+    result = subprocess.run([exe, "-hide_banner", "-encoders"], capture_output=True, text=True,
+                            timeout=60)
+    if result.returncode:
+        raise RuntimeError("Could not inspect required audio encoders: " + result.stderr[:300])
+    return result.stdout
 
 
-def conditions() -> List[Tuple[str, Callable[[np.ndarray, str], str]]]:
+def conditions(required_encoders: Sequence[str] = ("libmp3lame", "aac", "libopus", "libvorbis")
+               ) -> List[Tuple[str, Callable[[np.ndarray, str], str]]]:
     """[(label, fn(samples, basepath) -> path of the file to analyse)]."""
     from scipy.signal import butter, resample_poly, sosfiltfilt
 
@@ -332,16 +336,20 @@ def conditions() -> List[Tuple[str, Callable[[np.ndarray, str], str]]]:
         return wav(x + lvl * rng.standard_normal(len(x)), base)
 
     enc = _encoders()
+    tokens = set(enc.split())
+    missing = [name for name in required_encoders if name not in tokens]
+    if missing:
+        raise RuntimeError("Missing required audio encoders: " + ", ".join(missing))
     conds: List[Tuple[str, Callable[[np.ndarray, str], str]]] = [("WAV 44.1k", wav)]
-    if "libmp3lame" in enc:
+    if "libmp3lame" in tokens:
         conds += [("MP3 128k", codec(".mp3", ["-c:a", "libmp3lame", "-b:a", "128k"])),
                   ("MP3 64k", codec(".mp3", ["-c:a", "libmp3lame", "-b:a", "64k"]))]
-    if " aac " in enc:
+    if "aac" in tokens:
         conds.append(("AAC 96k", codec(".m4a", ["-c:a", "aac", "-b:a", "96k"])))
-    if "libopus" in enc:
+    if "libopus" in tokens:
         conds.append(("Opus 24k", codec(".opus", ["-c:a", "libopus", "-b:a", "24k",
                                                  "-application", "voip"])))
-    if "libvorbis" in enc:
+    if "libvorbis" in tokens:
         conds.append(("Vorbis q3", codec(".ogg", ["-c:a", "libvorbis", "-q:a", "3"])))
     conds += [("16 kHz", rs16), ("8 kHz tel.", tel8), ("+noise 20dB", noisy)]
     return conds
@@ -442,7 +450,9 @@ def run_tts(args, work: str) -> Dict[str, object]:
     else:
         voices = [(v, TEXTS_OTHER[lang][i % 2]) for i, (v, lang) in enumerate(VOICES_HELDOUT)
                   if v in have]
-    conds = dict(conditions())
+    if not voices:
+        raise RuntimeError("No usable `say` voices found for the requested TTS set")
+    conds = dict(conditions(required_encoders=("libmp3lame",)))
     variants = [("raw", "WAV 44.1k", False), ("MP3 64k", "MP3 64k", False),
                 ("16 kHz", "16 kHz", False), ("room", "WAV 44.1k", True),
                 ("room+MP3 64k", "MP3 64k", True)]
@@ -498,6 +508,7 @@ NONSPEECH_SOURCES = [
 def run_nonspeech(args, work: str) -> Dict[str, object]:
     """False positives on non-speech audio that ships with macOS (read in place)."""
     out = {}
+    failures = []
     print("\nNon-speech system audio (nothing here was edited by us; every flag is a false "
           "positive or a statement about how the sound was produced)")
     print("| material | files | manipulation >= 0.45 | AI-generation >= 0.45 | detectors over threshold |")
@@ -505,6 +516,7 @@ def run_nonspeech(args, work: str) -> Dict[str, object]:
     for name, pattern in NONSPEECH_SOURCES:
         files = sorted(glob.glob(pattern))[: args.max_files]
         if not files:
+            failures.append(f"missing source: {name} ({pattern})")
             continue
         n = man = ai = 0
         dets: Dict[str, int] = {}
@@ -512,8 +524,8 @@ def run_nonspeech(args, work: str) -> Dict[str, object]:
             try:
                 r = analyze_audio(f, max_seconds=120.0)
             except Exception as err:
-                if args.verbose:
-                    print("   cannot read", os.path.basename(f), err)
+                failures.append(f"cannot read {os.path.basename(f)}: {err}")
+                print("   cannot read", os.path.basename(f), err)
                 continue
             n += 1
             m, a = r.scores["manipulation"] >= FLAG, r.scores["ai_generation"] >= FLAG
@@ -527,10 +539,13 @@ def run_nonspeech(args, work: str) -> Dict[str, object]:
         out[name] = {"files": n, "manipulation": man, "ai": ai, "detectors": dets}
         print(f"| {name} | {n} | {man} | {ai} | "
               + (", ".join(f"{k} x{v}" for k, v in sorted(dets.items())) or "-") + " |")
+    if failures or not out:
+        raise RuntimeError(f"Incomplete nonspeech benchmark ({len(failures)} failures): "
+                           + "; ".join(failures))
     return out
 
 
-def main() -> None:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--n", type=int, default=12, help="recordings in the matrix")
     ap.add_argument("--set", choices=["dev", "heldout"], default="dev")
@@ -540,14 +555,21 @@ def main() -> None:
     ap.add_argument("--max-files", type=int, default=60)
     ap.add_argument("--json", help="also write the raw counts to this file")
     ap.add_argument("--verbose", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
+    if args.n < 1 or args.max_files < 1:
+        ap.error("--n and --max-files must be positive")
     if not ffmpeg_exe():
-        print("note: no ffmpeg found, codec conditions are skipped")
+        print("ERROR: no ffmpeg found; required audio conditions cannot be measured")
+        return 1
     sections = args.only or ["matrix", "tts", "nonspeech"]
     work = tempfile.mkdtemp(prefix="basira_audio_robust_")
     res: Dict[str, object] = {"set": args.set, "n": args.n}
     try:
         t0 = time.time()
+        if "matrix" in sections:
+            conditions()  # fail before generating speech if a required codec is absent
+        elif "tts" in sections:
+            conditions(required_encoders=("libmp3lame",))
         if "matrix" in sections:
             res["matrix"] = run_matrix(args, work)
         if "tts" in sections:
@@ -555,12 +577,16 @@ def main() -> None:
         if "nonspeech" in sections:
             res["nonspeech"] = run_nonspeech(args, work)
         print(f"\ntotal {time.time() - t0:.0f} s")
+    except (RuntimeError, OSError, subprocess.SubprocessError) as err:
+        print(f"ERROR: incomplete audio benchmark: {err}", file=sys.stderr)
+        return 1
     finally:
         shutil.rmtree(work, ignore_errors=True)
     if args.json:
         with open(args.json, "w") as f:
             json.dump(res, f, indent=1)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

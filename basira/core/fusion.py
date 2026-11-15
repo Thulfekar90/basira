@@ -7,7 +7,7 @@ this input, and contributions are combined with a noisy-OR. Consequences:
 * detectors that are quiet (score < 0.5) never push the verdict up,
 * one strong, trusted detector is enough to flag,
 * several moderate, independent detectors that agree reinforce each other,
-* "decisive" evidence (e.g. a generator's own metadata) short-circuits.
+* unsigned generator metadata remains an unverified lead, never provenance proof.
 
 Basira never outputs "authentic": absence of evidence is reported as
 "no significant traces found".
@@ -38,8 +38,6 @@ def category_score(evs: List[Evidence], cat: Category) -> float:
     rel = [e for e in evs if e.category == cat and e.error is None and e.confidence > 0]
     if not rel:
         return 0.0
-    if any(e.decisive and e.score >= 0.9 for e in rel):
-        return max(e.score for e in rel if e.decisive)
     p_clean = 1.0
     for e in rel:
         p_clean *= 1.0 - _excess(e)
@@ -93,17 +91,13 @@ def finalize(report: Report, spatial_shape=None) -> Report:
     report.scores = {"manipulation": manip, "ai_generation": ai, "provenance": prov,
                      "overall": overall}
 
-    decisive = [e for e in evs if e.decisive and e.score >= 0.9]
     what, top = ("AI-generated", ai) if ai >= manip else ("manipulated", manip)
-    if decisive:
-        level = 4
-        kind = "AI-generated" if any(e.category == Category.AI_GENERATION for e in decisive) \
-            else "Edited"
-        verdict = LEVELS[4].format(What=kind)
+    # Level 4 is reserved for a verified signature and trust policy. No verifier is
+    # implemented: neither the legacy decisive flag nor an input detail is proof.
     # The verdict follows the stronger single category. Weak hints from different
     # categories (say, a mild pixel anomaly plus "512x512 PNG without EXIF") must not add
     # up to an accusation; ``overall`` is reported but does not drive the level.
-    elif top >= 0.75:
+    if top >= 0.75:
         level, verdict = 3, LEVELS[3].format(what=what)
     elif top >= 0.45:
         level, verdict = 2, LEVELS[2]
@@ -111,6 +105,14 @@ def finalize(report: Report, spatial_shape=None) -> Report:
         level, verdict = 1, LEVELS[1]
     else:
         level, verdict = 0, LEVELS[0]
+    def has_unsigned_claim(r: Report) -> bool:
+        return any(e.error is None and e.confidence > 0 and e.score >= 0.9 and
+                   e.category == Category.AI_GENERATION and
+                   e.details.get("unverified_generator_claim") is True for e in r.evidences) or \
+            any(has_unsigned_claim(c) for c in r.children)
+
+    if level == 3 and ai >= manip and has_unsigned_claim(report):
+        verdict = "Metadata declares AI generation (unverified)"
     report.verdict, report.verdict_level = verdict, level
 
     ranked = sorted((e for e in evs if e.error is None and e.confidence > 0),
@@ -156,6 +158,11 @@ def finalize(report: Report, spatial_shape=None) -> Report:
             tail = "The remaining detectors found nothing, but the analysis is incomplete."
         report.explanation = [f"[{e.title}] {e.summary}" for e in failed[:4]] + \
             [f"[{c.media_type} track] part of its analysis failed" for c in child_failed] + [tail]
+
+    if report.info.get("content_empty"):
+        report.verdict_level = 1
+        report.verdict = "No content to analyse"
+        report.explanation = ["The file contains no analysable content; no clean-content conclusion is possible."]
 
     if spatial_shape is not None:
         report.fused_heatmap = fuse_heatmap(

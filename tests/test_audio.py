@@ -147,9 +147,9 @@ def test_metadata_elevenlabs(tmp_path, signals):
     _wav_with_info(p, x, S.SR, "ElevenLabs Text to Speech")
     r = analyze_audio(p)
     m = r.get("audio.metadata")
-    assert m.category == Category.AI_GENERATION and m.decisive and m.score >= 0.9, m.summary
+    assert m.category == Category.AI_GENERATION and not m.decisive and m.score >= 0.9, m.summary
     assert m.details["tags"].get("software", "").startswith("ElevenLabs")
-    assert r.verdict_level == 4
+    assert r.verdict_level == 3
 
 
 def test_metadata_editor_and_plain(tmp_path, signals):

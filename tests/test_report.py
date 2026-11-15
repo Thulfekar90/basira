@@ -154,7 +154,7 @@ def real(out):
     reports["splice"] = basira.analyze(S.make_splice(out, 2)[0])            # likely manipulated
     reports["copymove"] = basira.analyze(S.make_copymove(out, 3)[0])        # boxes + visuals
     reports["clean"] = basira.analyze(S.make_authentic(out, 3)[0])          # no traces
-    reports["sd"] = basira.analyze(S.make_sd_png(out, 12))                  # decisive metadata
+    reports["sd"] = basira.analyze(S.make_sd_png(out, 12))                  # Q02: unsigned metadata is capped at level 3
     garbage = os.path.join(out, "garbage.mp4")
     with open(garbage, "wb") as f:
         f.write(b"\x00\x00\x00\x18ftypmp42" + bytes(range(256)) * 12)
@@ -176,7 +176,7 @@ def real(out):
 # --------------------------------------------------------------------------- #
 def test_real_reports_of_every_kind_render(real):
     assert real["splice"].verdict_level == 3 and real["clean"].verdict_level == 0
-    assert real["sd"].verdict_level == 4 and "could not be analysed" in real["garbage"].verdict
+    assert real["sd"].verdict_level == 3 and "could not be analysed" in real["garbage"].verdict
     assert real["video"].children, "the video should carry an audio-track child report"
     for name, r in real.items():
         for lang in RH.LANGS:
@@ -427,7 +427,7 @@ def test_hostile_file_name_and_metadata_from_a_real_file(out):
     png = os.path.join(out, "'><svg onload=alert(7)><script>.png")
     Image.fromarray(S.camera_photo(2, 240, 320)).save(png, pnginfo=meta)
     r2 = basira.analyze(png)
-    assert r2.verdict_level == 4 and "alert(4)" in json.dumps(r2.to_dict())
+    assert r2.verdict_level == 3 and "alert(4)" in json.dumps(r2.to_dict())
     for rep in (r, r2):
         for lang in RH.LANGS:
             html = render_html(rep, lang)

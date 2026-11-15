@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import tempfile
+import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
@@ -235,6 +236,17 @@ setLang(q?q[1]:saved||((navigator.language||'').slice(0,2)==='ar'?'ar':'en'));
 </script></body></html>"""
 
 
+class AnalysisHTTPServer(ThreadingHTTPServer):
+    """One admitted upload/analysis at a time, with no waiting analysis queue.
+
+    This bounds concurrent analyses, not their duration or native decoder memory.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.analysis_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "Basira/" + __version__
     timeout = 60            # seconds a client may stay silent; stops slowloris holding threads
@@ -293,6 +305,17 @@ class Handler(BaseHTTPRequestHandler):
         if n <= 0 or n > MAX_UPLOAD:
             self.close_connection = True
             return self._send(400, b"empty or too large upload", "text/plain")
+        # Admit before reading the upload or allocating its temporary storage. A busy
+        # request must not wait while holding another large file or analysis in memory.
+        if not self.server.analysis_lock.acquire(blocking=False):
+            self.close_connection = True
+            return self._send(503, b"analysis busy; try again later", "text/plain")
+        try:
+            return self._analyze_upload(n)
+        finally:
+            self.server.analysis_lock.release()
+
+    def _analyze_upload(self, n: int):
         m = re.search(r"name=([^&]+)", self.path)
         name = os.path.basename(unquote(m.group(1))) if m else "upload"
         name = re.sub(r"[^\w.\- ]", "_", name)[:120].strip(". ") or "upload"
@@ -321,7 +344,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(port: int = 8642, open_browser: bool = True) -> int:
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv = AnalysisHTTPServer(("127.0.0.1", port), Handler)
     srv.allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
     srv.token = secrets.token_urlsafe(24)       # embedded in the page, required to upload
     url = f"http://127.0.0.1:{port}/"

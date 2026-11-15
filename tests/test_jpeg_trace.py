@@ -11,7 +11,7 @@ from PIL import Image
 
 import basira
 from basira.image.jpeg_trace import analyze_jpeg_trace
-from basira.image.load import from_array, load_image
+from basira.image.load import load_image
 
 import synth_image as S
 
@@ -36,7 +36,9 @@ def test_decoded_jpeg_stored_losslessly_is_clean(out, seed):
 
 
 def test_camera_original_without_jpeg_history_is_not_applicable(out):
-    e = analyze_jpeg_trace(from_array(S.camera_photo(3), "camera"))
+    # A losslessly stored camera original exercises absence of earlier-JPEG traces;
+    # an untyped raw array has unknown encoding and now abstains at the format gate.
+    e = analyze_jpeg_trace(load_image(_png(S.camera_photo(3), out, "camera.png")))
     assert e.score == 0.0 and e.confidence <= 0.1
     assert "no trace" in e.summary
 

@@ -248,14 +248,14 @@ def analyze_container(path: str) -> Tuple[List[Evidence], Dict[str, Any]]:
     ai = [s for s in sigs if s["kind"] == "ai"]
     ai_types = [t for t in src_types if "lgorithmic" in t or "ynthetic" in t]
     if ai or ai_types:
-        strong = bool(ai_types) or any(s["label"] != "C2PA AI assertion" for s in ai)
         out.append(Evidence(
             detector="video.generator_metadata", title="Generator metadata",
             category=Category.AI_GENERATION, score=0.97, confidence=1.0 if ai_types else 0.85,
-            decisive=strong,
-            summary="The container carries AI-generator markers: " + ", ".join(
+            decisive=False,
+            summary="Metadata declares AI generation (unverified): " + ", ".join(
                 dict.fromkeys([s["label"] for s in ai] + [f"IPTC:{t}" for t in ai_types]))[:300] + ".",
-            details={"signatures": ai, "iptc_source_types": src_types}))
+            details={"unverified_generator_claim": True,
+                     "signatures": ai, "iptc_source_types": src_types}))
     else:
         out.append(Evidence(
             detector="video.generator_metadata", title="Generator metadata",

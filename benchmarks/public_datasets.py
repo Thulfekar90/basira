@@ -4,7 +4,7 @@
     python benchmarks/public_datasets.py columbia --root DIR [--limit N]
     python benchmarks/public_datasets.py casia1   --root DIR [--limit N] [--csv OUT]
     python benchmarks/public_datasets.py casia2   --root DIR [--half dev|test] [--csv OUT]
-    python benchmarks/public_datasets.py coverage --root DIR [--csv OUT]
+    python benchmarks/public_datasets.py coverage --root DIR [--half dev|test] [--csv OUT]
 
 CoMoFoD (small, 512x512 copy-move, Tralic et al. 2013)  https://www.vcl.fer.hr/comofod/
     NNN_O.png original, NNN_F.png forged, NNN_B.png binary mask, plus post-processed
@@ -12,7 +12,7 @@ CoMoFoD (small, 512x512 copy-move, Tralic et al. 2013)  https://www.vcl.fer.hr/c
 Columbia Uncompressed Image Splicing (Hsu & Chang 2006)  https://www.ee.columbia.edu/ln/dvmm/downloads/authsplcuncmp/
     4cam_auth/*.tif authentic, 4cam_splc/*.tif spliced, edgemask/ colour-coded regions.
 
-Out-of-sample sets (never used to choose a threshold; see docs/BENCHMARKS.md):
+Datasets first evaluated out-of-sample (see README for later tuning/exposure):
 CASIA v1.0 (Dong et al. 2013), masks by Pham et al.  https://github.com/namtpham/casia1groundtruth
     Au/*.jpg authentic, Tp/Sp/*.jpg spliced, Tp/CM/*.jpg copy-move; <stem>_gt.png masks.
 CASIA v2.0, corrected masks  https://github.com/SunnyHaze/CASIA2.0-Corrected-Groundtruth
@@ -20,6 +20,8 @@ CASIA v2.0, corrected masks  https://github.com/SunnyHaze/CASIA2.0-Corrected-Gro
 COVERAGE (Wen et al. 2016)  https://github.com/wenbihan/coverage
     image/NN.tif original with similar-but-genuine objects, image/NNt.tif copy-move forgery,
     mask/NNforged.tif pasted region.
+    --half dev selects odd target IDs; test selects even IDs. Both were previously seen
+    in aggregate, so the even split is internal validation, not pristine out-of-sample.
 
 Reported: ROC-AUC of the manipulation score, flag rate at the default operating point
 ("Suspicious" or worse), and pixel-level F1 / IoU of the fused localisation map for
@@ -57,7 +59,9 @@ def pixel_scores(report, gt):
 
 def summarise(name, clean, forged, f1, iou, fired, t0, groups=None):
     c, f = np.array(clean), np.array(forged)
-    flagged_f1 = [x for x in f1 if x > 0]
+    if len(f1) != len(forged) or len(iou) != len(forged):
+        raise ValueError("Localisation scores must align with every analysed forgery")
+    flagged_f1 = [x for x, (level, _) in zip(f1, forged) if level >= 2]
     print(f"\n== {name}: {len(c)} authentic, {len(f)} forged  ({time.time() - t0:.0f}s)")
     print(f"ROC-AUC (manipulation score)        {auc(c[:, 1], f[:, 1]):.3f}")
     print(f"forged flagged                      {int((f[:, 0] >= 2).sum())} / {len(f)}"
@@ -89,7 +93,7 @@ def run(pairs, name, csv_path=None):
     out = open(csv_path, "w", encoding="utf-8") if csv_path else None
     if out:
         out.write("file,forged,group,level,manipulation,ai,fired,pixel_f1\n")
-    skipped = 0
+    skipped = missing_masks = 0
     for i, item in enumerate(pairs):
         p, is_forged, mask = item[:3]
         group = item[3] if len(item) > 3 else ""
@@ -110,8 +114,15 @@ def run(pairs, name, csv_path=None):
         if callable(mask):
             mask = mask()
         a = None
-        if is_forged and mask is not None:
-            a, b = pixel_scores(r, mask)
+        if is_forged:
+            # Keep scores aligned with the forged verdicts, including complete misses.
+            # No mask is not evidence of accurate localisation: count it conservatively
+            # as zero and disclose the count rather than silently shrinking the sample.
+            if mask is None:
+                a, b = 0.0, 0.0
+                missing_masks += 1
+            else:
+                a, b = pixel_scores(r, mask)
             f1.append(a)
             iou.append(b)
         if out:
@@ -126,6 +137,8 @@ def run(pairs, name, csv_path=None):
         out.close()
     if skipped:
         print(f"\n{skipped} file(s) could not be analysed (listed on stderr)")
+    if missing_masks:
+        print(f"{missing_masks} forged file(s) have no usable mask; localisation scored as zero")
     if clean and forged:
         summarise(name, clean, forged, f1, iou, fired, t0, groups)
     return clean, forged
@@ -263,40 +276,69 @@ def casia(root, limit, version, csv_path, half=None):
     run(pairs, f"CASIA v{version}.0" + (f" ({half} half)" if half else ""), csv_path)
 
 
-def coverage(root, limit, csv_path):
+def coverage(root, limit, csv_path, half=None):
+    """Odd target IDs are development; even IDs are previously seen internal validation.
+
+    Original, forgery and mask share the numeric target ID. ``limit`` counts target
+    IDs so selecting a small diagnostic subset cannot separate an original/forgery pair.
+    """
+    if half not in (None, "dev", "test"):
+        raise ValueError("COVERAGE half must be dev or test")
     img = _find_dir(root, "image")
     mask = _find_dir(root, "mask")
     if not img or not mask:
         sys.exit(f"no image/ and mask/ folders under {root}")
-    pairs = []
+    targets = defaultdict(list)
     for p in _images(img):
         stem = os.path.splitext(os.path.basename(p))[0]
+        target = stem[:-1] if stem.endswith("t") else stem
+        if not target.isascii() or not target.isdigit():
+            raise ValueError(f"Invalid COVERAGE target id: {stem}")
+        target_id = int(target)
+        if half and ("dev" if target_id % 2 else "test") != half:
+            continue
         if stem.endswith("t"):
             m = os.path.join(mask, stem[:-1] + "forged.tif")
-            pairs.append((p, True, _mask_loader(m if os.path.exists(m) else None), "copy-move"))
+            targets[target_id].append((p, True, _mask_loader(m if os.path.exists(m) else None), "copy-move"))
         else:
-            pairs.append((p, False, None))
-    run(_spread(pairs, limit), "COVERAGE", csv_path)
+            targets[target_id].append((p, False, None))
+    if not targets:
+        sys.exit("no COVERAGE images in requested split")
+    pairs = [p for target_id in _spread(sorted(targets), limit) for p in targets[target_id]]
+    label = "COVERAGE" + (f" ({half}: {'odd' if half == 'dev' else 'even'} target IDs; previously seen)" if half else "")
+    run(pairs, label, csv_path)
 
 
-if __name__ == "__main__":
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("dataset", choices=["comofod", "columbia", "casia1", "casia2", "coverage"])
     ap.add_argument("--root", required=True)
-    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--limit", type=int, default=0,
+                    help="limit samples (COVERAGE: target IDs, preserving original/forgery pairs)")
     ap.add_argument("--variants", nargs="*", default=[], help="CoMoFoD post-processing codes, e.g. JC IB NA")
     ap.add_argument("--csv", help="write one row per image (casia1, casia2, coverage)")
     ap.add_argument("--half", choices=["dev", "test"],
-                    help="casia2 only: the development half (tune here) or the held-out half")
-    a = ap.parse_args()
+                    help="casia2: target hash split; coverage: odd dev / even test (previously seen)")
+    a = ap.parse_args(argv)
+    if a.half and a.dataset not in ("casia2", "coverage"):
+        ap.error("--half applies to casia2 or coverage only")
+    if a.variants and a.dataset != "comofod":
+        ap.error("--variants applies to comofod only")
+    if a.csv and a.dataset not in ("casia1", "casia2", "coverage"):
+        ap.error("--csv applies to casia1, casia2 or coverage only")
+    if a.limit < 0:
+        ap.error("--limit must be nonnegative")
     print(f"basira {basira.__version__}")
     if a.dataset == "comofod":
         comofod(a.root, a.limit, a.variants)
     elif a.dataset == "columbia":
         columbia(a.root, a.limit)
     elif a.dataset == "coverage":
-        coverage(a.root, a.limit, a.csv)
+        coverage(a.root, a.limit, a.csv, a.half)
     else:
-        if a.half and a.dataset != "casia2":
-            sys.exit("--half applies to casia2 only")
         casia(a.root, a.limit, int(a.dataset[-1]), a.csv, a.half)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

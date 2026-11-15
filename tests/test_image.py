@@ -64,11 +64,11 @@ def test_shifted_jpeg_grid_region_is_found(out):
     assert S.hit_ratio(r.fused_heatmap, mask) > 3
 
 
-def test_generator_metadata_is_decisive(out):
+def test_generator_metadata_is_unverified_lead(out):
     r = basira.analyze(S.make_sd_png(out))
     ev = r.get("image.generator_metadata")
-    assert ev.decisive and ev.category == Category.AI_GENERATION
-    assert r.verdict_level == 4 and "AI-generated" in r.verdict
+    assert not ev.decisive and ev.category == Category.AI_GENERATION
+    assert r.verdict_level == 3 and "unverified" in r.verdict
     assert r.scores["ai_generation"] > 0.9
 
 

@@ -89,7 +89,10 @@ def test_empty_short_stereo_and_clipped_audio(d):
     for name, x in cases.items():
         p = os.path.join(d, name)
         sf.write(p, x, 48000)
-        _check(p, max_level=0)
+        # An empty file has no analysable content (D003 / R-D002-08).
+        report = _check(p, max_level=1 if name == "empty.wav" else 0)
+        if name == "empty.wav":
+            assert report.verdict_level == 1 and report.verdict == "No content to analyse"
 
 
 def test_unknown_file_type_is_a_clean_error(tmp_path):

@@ -17,6 +17,8 @@ _CHUNK = 1 << 21             # samples per chunk for energy computations
 def to_mono(samples: np.ndarray) -> np.ndarray:
     """(n,) or (n, ch) -> float32 (n,), NaN/inf replaced by 0."""
     a = np.asarray(samples, dtype=np.float32)
+    if a.size == 0:
+        return np.empty(0, dtype=np.float32)
     if a.ndim == 2:
         if 0 < a.shape[0] < a.shape[1] and a.shape[0] <= 8:  # (ch, n) given by mistake
             a = a.T

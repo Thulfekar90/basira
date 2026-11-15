@@ -29,12 +29,12 @@ def test_generator_name_in_a_title_is_not_proof(tmp_path):
     assert r.verdict_level < 4 and not r.get("image.generator_metadata").decisive
 
 
-def test_generator_in_software_field_is_proof(tmp_path):
+def test_generator_in_software_field_is_unsigned_claim(tmp_path):
     meta = PngInfo()
     meta.add_text("Software", "NovelAI")
     p = str(tmp_path / "nai.png")
     Image.fromarray(S.camera_photo(2, 384, 512)).save(p, pnginfo=meta)
-    assert basira.analyze(p).verdict_level == 4
+    assert basira.analyze(p).verdict_level == 3
 
 
 def test_non_finite_score_becomes_a_failed_detector():
@@ -93,11 +93,11 @@ def test_edit_list_entries_never_read_past_their_box():
 
 
 def test_local_server_requires_token_and_local_host(tmp_path):
-    from http.server import ThreadingHTTPServer
+    from basira.server import AnalysisHTTPServer
 
     from basira.server import Handler
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    srv = AnalysisHTTPServer(("127.0.0.1", 0), Handler)
     port = srv.server_address[1]
     srv.allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
     srv.token = "secret-token"
@@ -109,9 +109,19 @@ def test_local_server_requires_token_and_local_host(tmp_path):
     def post(headers):
         req = urllib.request.Request(url, data=data, method="POST", headers=headers)
         try:
-            return urllib.request.urlopen(req, timeout=60).status
+            with urllib.request.urlopen(req, timeout=60) as response:
+                status = response.status
+                response.read()
         except urllib.error.HTTPError as e:
-            return e.code
+            with e:
+                status = e.code
+                e.read()
+        # This test checks sequential authorization, not overlapping requests. Receiving
+        # headers (or even the last body byte) can precede the handler's finally block.
+        # Wait for its completion rather than retrying or accepting a legitimate 503.
+        assert srv.analysis_lock.acquire(timeout=60), "previous request did not finish"
+        srv.analysis_lock.release()
+        return status
 
     try:
         assert post({}) == 403                                             # no token
@@ -142,12 +152,12 @@ def test_chunk_named_parameters_without_generator_content_is_not_proof(tmp_path)
     assert r.verdict_level < 4 and not r.get("image.generator_metadata").decisive
 
 
-def test_real_comfyui_graph_is_proof(tmp_path):
+def test_real_comfyui_graph_is_unsigned_claim(tmp_path):
     meta = PngInfo()
     meta.add_text("prompt", '{"3": {"class_type": "KSampler", "inputs": {"seed": 1}}}')
     p = str(tmp_path / "comfy.png")
     Image.fromarray(S.camera_photo(2, 384, 512)).save(p, pnginfo=meta)
-    assert basira.analyze(p).verdict_level == 4
+    assert basira.analyze(p).verdict_level == 3
 
 
 def test_partial_stereo_cancellation_is_not_turned_into_silence():
@@ -270,11 +280,11 @@ def test_local_server_rejects_malformed_requests_cleanly(tmp_path):
     """Found by fuzzing the server: malformed lengths, odd paths, non-ASCII tokens and short
     bodies must get a reply, never a dropped connection or a traceback."""
     import socket
-    from http.server import ThreadingHTTPServer
+    from basira.server import AnalysisHTTPServer
 
     from basira.server import Handler
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    srv = AnalysisHTTPServer(("127.0.0.1", 0), Handler)
     port = srv.server_address[1]
     srv.allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
     srv.token = "secret-token"
@@ -424,6 +434,20 @@ def test_refused_audio_track_is_not_a_clean_video(tmp_path, monkeypatch):
     assert "could not be analysed" in r.verdict or "failed" in r.verdict, r.verdict
 
 
+def _pgrep_children(pattern):
+    """An unavailable process monitor is unknown, never proof of no descendants."""
+    import subprocess
+
+    try:
+        result = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
+    except OSError as exc:
+        pytest.skip(f"pgrep unavailable: {exc}")
+    if result.returncode not in (0, 1):
+        pytest.skip(f"pgrep cannot inspect processes (exit {result.returncode}): "
+                    f"{result.stderr.strip()}")
+    return result.stdout
+
+
 @pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups are POSIX only")
 @pytest.mark.parametrize("worker", ["start_child_and_hang", "start_child_and_crash"])
 def test_worker_pool_leaves_no_decoder_behind(worker):
@@ -434,14 +458,21 @@ def test_worker_pool_leaves_no_decoder_behind(worker):
     import pool_helpers
     from basira import cli
 
-    items = [{"index": 0, "path": "x", "display": "x", "rel": "x"}]
-    events = list(cli.run_pool(items, 1, 3, getattr(pool_helpers, worker), {}))
-    assert events[-1][1]["error"]["kind"] in ("timeout", "crashed")
     pattern = f"time.sleep\\({pool_helpers.MARK}\\)"
-    for _ in range(20):
-        left = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True).stdout
-        if not left.strip():
-            break
-        time.sleep(0.25)
-    subprocess.run(["pkill", "-f", pattern])
-    assert not left.strip(), f"orphaned child process(es): {left.split()}"
+    _pgrep_children(pattern)       # Check capability before creating any test children.
+    items = [{"index": 0, "path": "x", "display": "x", "rel": "x"}]
+    try:
+        events = list(cli.run_pool(items, 1, 3, getattr(pool_helpers, worker), {}))
+        assert events[-1][1]["error"]["kind"] in ("timeout", "crashed")
+        for _ in range(20):
+            left = _pgrep_children(pattern)
+            if not left.strip():
+                break
+            time.sleep(0.25)
+        assert not left.strip(), f"orphaned child process(es): {left.split()}"
+    finally:
+        # Cleanup also runs when an assertion or a later monitor check fails/skips.
+        try:
+            subprocess.run(["pkill", "-f", pattern], capture_output=True)
+        except OSError:
+            pass

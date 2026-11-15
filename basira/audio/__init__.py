@@ -123,7 +123,7 @@ def analyze_audio(path: str, *, samples: "np.ndarray|None" = None, sr: "int|None
             raise ValueError("analyze_audio(samples=...) also needs sr=")
         data = np.asarray(samples, dtype=np.float32)
         data = data[:, None] if data.ndim == 1 else data
-        if data.ndim == 2 and data.shape[0] < data.shape[1] and data.shape[0] <= 8:
+        if data.ndim == 2 and 0 < data.shape[0] < data.shape[1] and data.shape[0] <= 8:
             data = data.T
         total_frames = data.shape[0]
         if max_seconds:
@@ -176,6 +176,7 @@ def analyze_audio(path: str, *, samples: "np.ndarray|None" = None, sr: "int|None
 
     report = Report(path=path, media_type="audio", info=info)
     if n == 0:
+        report.info["content_empty"] = True
         report.evidences.append(Evidence.not_applicable(SPL_ID, SPL_TITLE, Category.MANIPULATION,
                                                         "empty audio"))
         return finalize(report)

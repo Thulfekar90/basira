@@ -125,9 +125,10 @@ def test_located_requires_an_edge_near_the_truth():
     assert B.located([(0.0, 8.0, "")], truth, 8.0)[0] is False      # covers everything: no credit
 
 
-def test_benchmark_skips_without_ffmpeg(monkeypatch, capsys):
+def test_benchmark_fails_without_ffmpeg(monkeypatch, capsys):
     monkeypatch.setattr(B, "ffmpeg_exe", lambda: None)
-    assert B.main(["--source", "/nonexistent/clip.mov"]) == 0
+    # R-D002-04: an unmeasured benchmark must not appear to have passed.
+    assert B.main(["--source", "/nonexistent/clip.mov"]) != 0
     assert "nothing to measure" in capsys.readouterr().out
 
 

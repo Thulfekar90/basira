@@ -93,7 +93,7 @@ forced are listed under it.
 
 | Dataset | Originals flagged | Forgeries flagged | Pixel F1 when flagged | ROC-AUC |
 |---|---|---|---|---|
-| **Columbia Uncompressed Splicing** (183 camera originals, 180 splices, TIFF) | **0 / 183** | 54 / 180 (30%) | 0.73 | 0.69 |
+| **Columbia Uncompressed Splicing** (183 camera originals, 180 splices, TIFF) | **0 / 183** | 55 / 180 (31%) | 0.72 | 0.69 |
 | **CoMoFoD small** (200 originals, 200 copy-move forgeries, PNG) | **0 / 200** | 159 / 200 (80%) | 0.83 | 0.90 |
 
 CoMoFoD after JPEG re-compression of the whole image (the dataset's own `JC` variants):
@@ -102,6 +102,10 @@ CoMoFoD after JPEG re-compression of the whole image (the dataset's own `JC` var
 |---|---|---|---|---|---|---|---|---|---|
 | Forged flagged (of 200) | 78 | 129 | 91 | 69 | 58 | 51 | 37 | 22 | 6 |
 | Originals flagged (of 200) | 0 | 5 | 3 | 3 | 0 | 3 | 0 | 0 | 0 |
+
+Detection counts match the preceding baseline. Correcting the conditional F1 denominator
+changes JC6 from 0.715 to 0.704: flagged zero-overlap forgeries now remain in the mean.
+Its all-forgery F1/IoU and ROC-AUC are unchanged at the printed precision.
 
 How to read this:
 
@@ -115,11 +119,26 @@ How to read this:
 
 Run once, thresholds frozen at commit `636c759` before the data was downloaded; nothing was changed after seeing these numbers.
 
+The historical table below is preserved. Its conditional F1 excluded flagged forgeries
+with zero overlap and was slightly optimistic; use the corrected figures below it.
+
 | Dataset | Originals flagged | Forgeries flagged | Pixel F1 when flagged | ROC-AUC |
 |---|---|---|---|---|
 | **CASIA v1.0** (800 originals, 921 forgeries, JPEG; masks by Pham et al.) | 8 / 800 (1.0%) | 361 / 921 (39%) — copy-move 273 / 459, splicing 88 / 462 | 0.50 | 0.71 |
 | **CASIA v2.0** (7,491 originals, 5,123 forgeries, JPEG/TIFF; corrected masks) | 120 / 7,491 (1.6%) | 1,876 / 5,123 (37%) — copy-move 1,632 / 3,295, splicing 244 / 1,828 | 0.56 | 0.68 |
 | **COVERAGE** (100 originals with similar-but-genuine objects, 100 copy-move forgeries, TIFF) | **12 / 100 (12%)** | 65 / 100 (65%) | 0.56 | 0.81 |
+
+Recomputed with `benchmarks/recompute_csv_metrics.py` from the saved, rounded CSV values;
+no detector or held-out media was rerun. The denominator now includes **every flagged
+forgery**, including zero F1. Missing masks are counted as zero and disclosed separately;
+the archived CASIA v1 CSV has one missing score on an unflagged forgery.
+
+| Saved run | Previous positive-only F1 | Corrected flagged F1 | Flagged forgeries | Zero F1 included |
+|---|---|---|---|---|
+| CASIA v1 | 0.495 | 0.487 | 361 | 6 |
+| CASIA v2 | 0.558 | 0.552 | 1876 | 23 |
+| COVERAGE | 0.557 | 0.548 | 65 | 1 |
+| CASIA v2 held-out, after jpeg_trace | 0.613 | 0.606 | 936 | 11 |
 
 - **Copy-move generalises; splicing in JPEG does not.** Half or more of the clones are found everywhere, but only 13–19% of the CASIA splices.
 - **COVERAGE is the real failure.** It was built to trap copy-move detectors: every original contains physically identical objects (the same product twice on a shelf). Basira flags 12 of them as clones. The shared-noise test that cleared CoMoFoD's printed coasters does not separate them here — on the false alarms its correlation is 0.55–0.87, on the detected forgeries 0.57–1.0 — so no threshold fixes this without giving up a large share of real detections. **A copy-move finding on an image with repeated manufactured objects needs a human look.**
@@ -143,26 +162,26 @@ Run `benchmarks/evaluate_folder.py` on your own material before trusting any of 
 
 ### Real content with forgeries made by this project
 
-`benchmarks/real_content.py` cuts real photographs and real video frames into 1024×768 photos, simulates a camera save, and builds forgeries with ground truth. Run on 34 textured crops from two photographs and one 4K video (not bundled: point the script at your own folder):
+`benchmarks/real_content.py` cuts real photographs and real video frames into 1024×768 photos, simulates a camera save, and builds forgeries with ground truth. The current run uses 25 textured crops from the first 30 lexicographically sorted Columbia originals whose width is at least 1024 and height at least 768; the existing texture filter excludes five crops. This is an in-sample corpus, with all media outside the repository. It replaces the earlier 34-crop table whose source manifest was unavailable; the two runs are not an improvement comparison. Run `--sources DIR --n 30 --robust` on that selection to reproduce it.
 
 | Family | Flagged | Edit correctly located |
 |---|---|---|
-| Clean, one save | **0 / 34** | – |
-| Clean, saved twice | **0 / 34** | – |
-| Splice from another photo | 24 / 34 | 24 / 34 |
-| Copy-move | 29 / 34 | 29 / 34 |
-| Object removal (OpenCV in-painting) | 13 / 34 | 13 / 34 |
+| Clean, one save | **0 / 25** | – |
+| Clean, saved twice | **0 / 25** | – |
+| Splice from another photo | 18 / 25 | 18 / 25 |
+| Copy-move | 20 / 25 | 20 / 25 |
+| Object removal (OpenCV in-painting) | 5 / 25 | 5 / 25 |
 
 After the forgery is post-processed the way platforms do it:
 
 | Flagged after… | re-save Q85 | re-save Q70 | re-save Q50 | downscale 75% | downscale 50% |
 |---|---|---|---|---|---|
-| Clean (false positives) | 0 / 34 | 0 / 34 | 0 / 34 | 0 / 34 | 0 / 34 |
-| Splice | 11 / 34 | 0 / 34 | 0 / 34 | 2 / 34 | 0 / 34 |
-| Copy-move | 28 / 34 | 24 / 34 | 16 / 34 | 23 / 34 | 22 / 34 |
-| Object removal | 6 / 34 | 0 / 34 | 0 / 34 | 0 / 34 | 0 / 34 |
+| Clean (false positives) | 0 / 25 | 0 / 25 | 0 / 25 | 0 / 25 | 0 / 25 |
+| Splice | 11 / 25 | 0 / 25 | 0 / 25 | 0 / 25 | 0 / 25 |
+| Copy-move | 17 / 25 | 8 / 25 | 4 / 25 | 14 / 25 | 12 / 25 |
+| Object removal | 4 / 25 | 0 / 25 | 0 / 25 | 1 / 25 | 0 / 25 |
 
-**Compression-history traces (splice, in-painting) are gone after one more lossy save.** Only geometric evidence (copy-move) survives. Crops without texture (blank sky, fog) are excluded: an edit there leaves nothing to measure.
+**Compression-history detection (splice, in-painting) falls sharply after another lossy save.** Copy-move survives more often, but also loses detections. Crops without texture (blank sky, fog) are excluded: an edit there leaves nothing to measure.
 
 ### Synthetic, with a simulated camera
 
@@ -192,6 +211,18 @@ That benchmark is optimistic. `benchmarks/audio_robustness.py` is harder: synthe
 
 On 60 macOS ring tones 3 are flagged (they contain produced digital silence); 0 of 30 alert and ambient sounds. A 10-minute 48 kHz file analyses in about 5 s. **No real microphone recording and no real voice-cloning output has been measured.**
 
+Current development-only regression (`--set dev --n 12 --max-files 60`, all sections):
+clean manipulation and AI flags are 0/12 in each of nine delivery conditions. This is
+a different set from the historical held-out table above: cuts with hum are located
+in 2–3/18 cases, or 0/18 at telephone bandwidth; inserts in 3/12, or 0/12 by telephone.
+One clean 16 kHz recording has a reported segment without reaching the flag threshold.
+The TTS section flags AI in 8/21 raw and 6/21 MP3 voices, but 0/21 after resampling or
+room simulation; one MP3 TTS voice is wrongly flagged as manipulated. System audio:
+0/14 alerts, 0/16 ambient sounds, 0/6 music clips, 3/60 ring tones flagged. No thresholds
+were adjusted after seeing these results; held-out voices were not rerun.
+The complete development matrix, TTS and system-audio JSON matched a same-input run
+of the preceding `f555748` source exactly, including those existing errors and misses.
+
 ### Video
 
 `benchmarks/video_robustness.py` on 6 camera-like clips cut from two real high-resolution sources (1080p / 720p, 25 / 30 fps, with and without B-frames), each delivered in 9 ways (re-encodes, messenger-style profile, scaling), 585 files; all thresholds are relative to the clip's own motion:
@@ -209,19 +240,34 @@ On 60 macOS ring tones 3 are flagged (they contain produced digital silence); 0 
 
 The thresholds were chosen on these same clips (no held-out set), and the sources are graded aerial and rendered footage, not phone video. A 60 s 1080p clip analyses in about 9 s.
 
+The current full regression used the benchmark's explicitly **synthetic** sources,
+because the historical real-footage sources were unavailable. It completed 585 files:
+0/54 clean and 0/207 natural-event clips reached level 1 or had any reported time range.
+These are different inputs from the historical table and do not measure a change in
+real-footage performance. Location alone can occur below the suspicious threshold:
+
+| Current synthetic video | Located within 0.25 s | Verdict ≥2 |
+|---|---|---|
+| 15 frames removed | 52 / 54 | 45 / 54 |
+| 5 frames removed | 0 / 54 | 0 / 54 |
+| Replayed footage | 50 / 54 | 50 / 54 |
+| Frozen frames | 54 / 54 | 54 / 54 |
+| Foreign footage inserted | 0 / 54 | 0 / 54 |
+| Speed change | 0 / 54 | 0 / 54 |
+
 ## Limitations (read this)
 
-- **"Is this AI-generated?" is the weakest question here.** Without a trained model, Basira answers it reliably only through provenance: generator metadata, C2PA Content Credentials and IPTC `trainedAlgorithmicMedia` labels (decisive when present — and trivially stripped). The pixel-level generator fingerprint works on lossless files that were not resized; it is blind on JPEGs, because JPEG's 8×8 blocking occupies the same frequencies. The audio "TTS-like" cues also fire on noise-gated and phone audio and are weighted low on purpose. A modern diffusion image re-saved by a social network will usually come back as *"No significant traces found"*.
+- **"Is this AI-generated?" is the weakest question here.** Generator metadata, C2PA text markers and IPTC `trainedAlgorithmicMedia` labels are unsigned declarations that can be planted or stripped. Strong declarations can reach level 3: **"Metadata declares AI generation (unverified)"**. Basira does not verify C2PA signatures; level 4 is reserved for verified provenance and is currently unreachable. The pixel-level generator fingerprint works on lossless files that were not resized; it is blind on JPEGs, because JPEG's 8×8 blocking occupies the same frequencies. The audio "TTS-like" cues also fire on noise-gated and phone audio and are weighted low on purpose. A modern diffusion image re-saved by a social network will usually come back as *"No significant traces found"*.
 - **Localising edits is the stronger part, and it is still modest.** On public data Basira flags most uncompressed copy-move forgeries (in-sample, see above), few after strong JPEG compression, and under a third of uncompressed splices. Each method has a precondition: the double-quantisation map needs a JPEG saved at least twice, directly, with the grid intact; the colour-filter test needs a near-lossless camera image; copy-move needs texture or an exactly copied smooth area, misses many clones after heavy JPEG compression or added noise, and is fooled by repeated manufactured objects (12% of COVERAGE originals). Out-of-sample, about half the copy-move forgeries and 13–19% of JPEG splices are found; splices stored losslessly after a JPEG history are now found about one time in five.
 - **Resizing, screenshots and platform re-compression destroy most traces** — see the robustness table above. An image that went through WhatsApp, X or Instagram has usually lost the splice and in-painting evidence. That is physics, not a bug.
 - **Audio**: a cut is found only when the recording carries mains hum; an insertion only when its background noise differs and there are quiet pauses; a real change of room looks the same as a splice. Telephone-band audio hides almost everything. Re-recorded or resampled synthetic speech is invisible.
 - **Video**: footage from another source cut in with hard cuts, and speed changes, cannot be seen — a legitimate edit looks the same. Removal is found only inside one continuous shot. The double-compression and source-noise tests are informational (they cannot change the verdict on their own); neither has been validated on real footage.
-- **Five public image datasets, none for audio or video.** Thresholds were tuned on Columbia and CoMoFoD; CASIA v1, CASIA v2 and COVERAGE are out-of-sample. Audio and video were measured on simulated and derived material only (tables above). IMD2020, NIST16, ASVspoof and FakeAVCeleb have not been run. Use `benchmarks/evaluate_folder.py`; contributions with reproducible numbers are very welcome.
+- **Five public image datasets, none for audio or video.** Thresholds were tuned on Columbia and CoMoFoD. CASIA v1, CASIA v2 and COVERAGE were first evaluated out-of-sample; later jpeg_trace tuning used only CASIA v2 development targets. COVERAGE odd/even target splits are now available for future development/internal validation; both halves have already been observed in aggregate. Audio and video were measured on simulated and derived material only (tables above). IMD2020, NIST16, ASVspoof and FakeAVCeleb have not been run. Use `benchmarks/evaluate_folder.py`; contributions with reproducible numbers are very welcome.
 - A forensic tool gives leads for a human examiner. Do not use its output as the sole basis for an accusation.
 
 ## How it decides
 
-Each detector returns `score` (0.5 = its threshold) and `confidence` (how applicable it is to *this* file — e.g. ELA on a PNG gets almost none). Only the part of a score above 0.5 counts, scaled by confidence, and detectors combine with a noisy-OR. So one strong trusted detector is enough, several moderate independent ones reinforce each other, and quiet ones contribute nothing. Generator metadata is "decisive" and short-circuits the verdict. Details: [docs/METHODS.md](docs/METHODS.md).
+Each detector returns `score` (0.5 = its threshold) and `confidence` (how applicable it is to *this* file — e.g. ELA on a PNG gets almost none). Only the part of a score above 0.5 counts, scaled by confidence, and detectors combine with a noisy-OR. So one strong trusted detector is enough, several moderate independent ones reinforce each other, and quiet ones contribute nothing. Unsigned generator metadata follows the same fusion and never proves origin. Details: [docs/METHODS.md](docs/METHODS.md).
 
 ## Develop
 

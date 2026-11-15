@@ -80,7 +80,7 @@ class Evidence:
     regions: List[Region] = field(default_factory=list)
     visuals: Dict[str, np.ndarray] = field(default_factory=dict)  # extra RGB uint8 images
     series: Dict[str, Any] = field(default_factory=dict)          # 1-D curves for plots
-    decisive: bool = False            # hard proof (e.g. generator metadata)
+    decisive: bool = False            # legacy field; not signature verification or level-4 authority
     error: Optional[str] = None
 
     def __post_init__(self) -> None:

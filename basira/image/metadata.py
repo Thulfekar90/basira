@@ -18,7 +18,7 @@ from .load import DECODE_LOCK, ImageData, open_untrusted
 EXIF_MAKE, EXIF_MODEL, EXIF_SOFTWARE, EXIF_DATETIME = 271, 272, 305, 306
 EXIF_DT_ORIG, EXIF_DT_DIGI = 36867, 36868
 
-# PNG text keys written by popular generators (decisive when present with content).
+# PNG text conventions used by generators; unsigned declarations, not verified origin.
 GEN_TEXT_KEYS = {
     "parameters": "AUTOMATIC1111 / Forge / SD.Next",
     "prompt": "ComfyUI",
@@ -185,7 +185,7 @@ def analyze_metadata(d: ImageData) -> List[Evidence]:
     src_types = iptc_source_types(data[: 4 << 20] + xmp.encode("utf-8", "ignore"))
     gen_text = _generator_from_text(d.pil_info)
 
-    # ---------------- 1. Generator markers (decisive) ---------------- #
+    # ---------------- 1. Unsigned generator declarations ---------------- #
     ai_sigs = [s for s in sigs if s["kind"] == "ai"]
     ai_types = [t for t in src_types if "Algorithmic" in t or "Synthetic" in t or
                 t in ("trainedAlgorithmicMedia", "compositeWithTrainedAlgorithmicMedia")]
@@ -198,13 +198,14 @@ def analyze_metadata(d: ImageData) -> List[Evidence]:
             detector="image.generator_metadata", title="Generator metadata",
             category=Category.AI_GENERATION,
             score=0.97 if strong else 0.8, confidence=1.0 if strong else 0.6,
-            decisive=strong,
-            summary=("The file carries metadata written by an AI generator: "
+            decisive=False,
+            summary=("Metadata declares AI generation (unverified): "
                      + ", ".join(dict.fromkeys(labels))[:300]
                      + (". The IPTC source type says the image is a composite that "
                         "includes AI-generated parts." if partial else ".")
                      + ("" if strong else " (byte-level match only; verify manually)")),
-            details={"generator_text": gen_text, "iptc_source_types": src_types,
+            details={"unverified_generator_claim": strong,
+                     "generator_text": gen_text, "iptc_source_types": src_types,
                      "signatures": ai_sigs}))
     else:
         out.append(Evidence(

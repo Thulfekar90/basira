@@ -64,6 +64,38 @@ ZIGZAG = np.array([
     58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63])
 
 
+def _webp_lossless(raw: bytes) -> bool:
+    """Recognise a single VP8L image, conservatively, within bounded RIFF chunks.
+
+    Pillow does not expose the lossless bit in ``info``. Do not infer it from the
+    extension, EXIF text, or the presence of the bytes VP8L inside another chunk.
+    Animated or malformed containers are outside this still-image precondition.
+    """
+    if len(raw) < 12 or raw[:4] != b"RIFF" or raw[8:12] != b"WEBP":
+        return False
+    if int.from_bytes(raw[4:8], "little") + 8 != len(raw):
+        return False
+    offset, images = 12, 0
+    while offset < len(raw):
+        if len(raw) - offset < 8:
+            return False
+        kind = raw[offset:offset + 4]
+        size = int.from_bytes(raw[offset + 4:offset + 8], "little")
+        start = offset + 8
+        end = start + size
+        padded_end = end + (size & 1)
+        if padded_end > len(raw):
+            return False
+        if kind in (b"VP8 ", b"ANIM", b"ANMF"):
+            return False
+        if kind == b"VP8L":
+            if size < 5 or raw[start] != 0x2f or raw[start + 4] & 0xe0:
+                return False
+            images += 1
+        offset = padded_end
+    return images == 1
+
+
 def ijg_table(q: int) -> np.ndarray:
     q = int(np.clip(q, 1, 100))
     scale = 5000 / q if q < 50 else 200 - 2 * q
@@ -98,8 +130,16 @@ class ImageData:
 
     @property
     def lossless(self) -> bool:
-        return self.format in ("PNG", "BMP", "TIFF", "GIF") or \
-            (self.format == "WEBP" and self.pil_info.get("lossless", False))
+        if self.format in ("PNG", "BMP", "GIF"):
+            return True
+        if self.format == "TIFF":
+            # TIFF is a container: both old/new JPEG compression are lossy.
+            # Unrecognised codecs are not assumed lossless.
+            return self.pil_info.get("compression") in {
+                "raw", "tiff_ccitt", "group3", "group4", "tiff_lzw",
+                "tiff_adobe_deflate", "tiff_deflate", "packbits",
+            }
+        return self.format == "WEBP" and _webp_lossless(self.raw)
 
 
 def _table_natural(tbl) -> Optional[np.ndarray]:

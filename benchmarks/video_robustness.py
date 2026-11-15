@@ -671,13 +671,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--jobs", type=int, default=max(1, min(6, (os.cpu_count() or 2) - 2)))
     ap.add_argument("--json", help="write every per-file result to this JSON file")
     args = ap.parse_args(argv)
+    if args.jobs < 1:
+        ap.error("--jobs must be positive")
     if ffmpeg_exe() is None:
         print("ffmpeg is not available (pip install imageio-ffmpeg): nothing to measure.")
-        return 0
+        return 1
     missing = [s for s in args.source if not os.path.isfile(s)]
     for s in missing:
-        print(f"skipping {s}: not a file")
-    paths = [s for s in args.source if s not in missing]
+        print(f"ERROR requested source is not a file: {s}")
+    if missing:
+        print(f"INCOMPLETE: {len(missing)} requested source(s) missing; no substitute corpus used.")
+        return 1
+    paths = args.source
     if paths:
         sources: List[Any] = [RealSource(p) for p in paths]
         print(f"Real footage: {len(sources)} source(s): " + ", ".join(
@@ -691,8 +696,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     os.makedirs(work, exist_ok=True)
     t0 = time.time()
     manifest = os.path.join(work, "jobs.json")
+    config_path = os.path.join(work, "run-config.json")
+    config = {"mode": "real" if paths else "synthetic", "quick": args.quick,
+              "conditions": list(conditions),
+              "sources": [{"path": os.path.abspath(p), "size": os.stat(p).st_size,
+                           "mtime_ns": os.stat(p).st_mtime_ns} for p in paths]}
     try:
         if os.path.exists(manifest):         # --work DIR from an earlier run: reuse its clips
+            try:
+                with open(config_path) as f:
+                    previous_config = json.load(f)
+            except (OSError, ValueError):
+                previous_config = None
+            if previous_config != config:
+                print("ERROR: cached corpus does not match this invocation (or lacks source metadata). "
+                      "Use a new --work directory; no cached source was substituted.")
+                return 1
             with open(manifest) as f:
                 jobs = json.load(f)
             print(f"  reusing the clips in {work}")
@@ -702,6 +721,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 j["keep"] = bool(args.work)
             with open(manifest, "w") as f:
                 json.dump(jobs, f)
+            with open(config_path, "w") as f:
+                json.dump(config, f, indent=2)
         print(f"  {len(jobs)} clips x {len(conditions)} conditions, {args.jobs} worker(s) "
               f"(built in {time.time() - t0:.0f} s)")
         if args.jobs > 1:
@@ -723,6 +744,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.json:
         with open(args.json, "w") as f:
             json.dump(rows, f)
+    errors = sum(1 for r in rows if "error" in r)
+    if not rows or errors:
+        print(f"INCOMPLETE: {errors} failed clip(s), {len(rows)} result row(s).")
+        return 1
     return 0
 
 

@@ -88,6 +88,9 @@ def analyze_jpeg_trace(d: ImageData) -> Evidence:
     if d.is_jpeg:
         return Evidence.not_applicable(det, title, Category.MANIPULATION,
                                        "JPEG file (covered by the double-quantisation map)")
+    if d.format not in ("PNG", "BMP", "TIFF", "WEBP") or not d.lossless:
+        return Evidence.not_applicable(det, title, Category.MANIPULATION,
+                                       "requires a known lossless PNG, BMP, TIFF or WEBP encoding")
     y = _y_plane(d)
     if min(y.shape) < 64:
         return Evidence.not_applicable(det, title, Category.MANIPULATION, "image too small")

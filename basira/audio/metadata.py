@@ -24,7 +24,7 @@ How it scores
 transcoder alone stays below the 0.5 decision threshold, editing software lands
 around 0.73 and a generator marker at ~0.95. Only *explicit* generator markers
 (voice-generator names, IPTC ``trainedAlgorithmicMedia``, C2PA AI assertions)
-are marked ``decisive``. Metadata is trivially removable or forgeable, so
+are strong unsigned declarations, never verified provenance. Metadata is removable or forgeable, so
 absence of markers is never evidence of authenticity.
 """
 from __future__ import annotations
@@ -46,8 +46,8 @@ MAX_CHUNK_BYTES = 4 << 20       # never read more than this per metadata chunk
 GENERIC_SCAN_BYTES = 256 << 10  # head / tail scanned for containers we do not parse
 
 # Generator labels (from core.utils.SIGNATURES) that are explicit enough to be
-# treated as decisive when they appear in metadata.
-DECISIVE_AI_LABELS = {
+# treated as strong (but unverified) when they appear in metadata.
+STRONG_AI_LABELS = {
     "ElevenLabs", "Commercial TTS service",
     "IPTC DigitalSourceType = trainedAlgorithmicMedia",
     "IPTC DigitalSourceType = compositeWithTrainedAlgorithmicMedia",
@@ -318,7 +318,7 @@ def detect_metadata(path: str, *, skip_reason: Optional[str] = None,
 
     raw_level = 3.0 if ai else 2.0 if edit else 1.0 if trans else 0.0
     score = utils.calibrate(raw_level, MARKER_THRESHOLD, MARKER_SOFTNESS)
-    decisive = any(h["label"] in DECISIVE_AI_LABELS for h in ai)
+    strong = any(h["label"] in STRONG_AI_LABELS for h in ai)
     category = Category.AI_GENERATION if ai else Category.PROVENANCE
 
     software = [tags[k] for k in ("software", "encoder", "encoder_settings", "encoded_by",
@@ -326,7 +326,7 @@ def detect_metadata(path: str, *, skip_reason: Optional[str] = None,
                 if tags.get(k)]
     parts: List[str] = []
     if ai:
-        parts.append("Generator marker(s) found in metadata: "
+        parts.append("Metadata declares AI generation (unverified): "
                      + ", ".join(h["label"] for h in ai) + ".")
     if edit:
         parts.append("Editing software recorded: " + ", ".join(h["label"] for h in edit) + ".")
@@ -342,7 +342,7 @@ def detect_metadata(path: str, *, skip_reason: Optional[str] = None,
     parts.append(f"Marker level {raw_level:.0f}/3 (0 none, 1 transcoder, 2 editor, 3 generator).")
 
     if ai:
-        confidence = 0.9 if decisive else 0.6
+        confidence = 0.9 if strong else 0.6
     elif edit:
         confidence = 0.6
     elif trans:
@@ -350,6 +350,7 @@ def detect_metadata(path: str, *, skip_reason: Optional[str] = None,
     else:
         confidence = 0.2
     details = {
+        "unverified_generator_claim": bool(strong),
         "raw_marker_level": raw_level, "threshold": MARKER_THRESHOLD,
         "container": sfinfo, "lossy": is_lossy(sfinfo, path),
         "tags": {k: (v[:200] if isinstance(v, str) else v) for k, v in tags.items()},
@@ -357,4 +358,4 @@ def detect_metadata(path: str, *, skip_reason: Optional[str] = None,
     }
     return Evidence(detector=DETECTOR, title=TITLE, category=category, score=score,
                     confidence=confidence, summary=" ".join(parts), details=details,
-                    decisive=bool(decisive and score >= 0.9))
+                    decisive=False)

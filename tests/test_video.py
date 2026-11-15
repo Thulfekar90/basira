@@ -82,10 +82,10 @@ def test_double_compression_reveals_previous_gop(out, gop1):
     assert e2.score > 0.5 and e2.details["candidate_period"] == gop1, e2.details
 
 
-def test_generator_tag_in_container_is_decisive(out):
+def test_generator_tag_in_container_is_unverified_lead(out):
     path, _ = V.make_tagged(out, 6)
     r = basira.analyze(path)
-    assert r.verdict_level == 4 and r.scores["ai_generation"] > 0.9
+    assert r.verdict_level == 3 and r.scores["ai_generation"] > 0.75
 
 
 def test_audio_track_becomes_child_report(out):

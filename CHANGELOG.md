@@ -13,6 +13,24 @@ Nothing has been published yet. This section is derived from the commit history
 
 ### Fixed
 
+- English and Arabic image tables now use the same measured values, checked by a
+  regression test. The real-content table uses a documented Columbia-derived corpus;
+  its different sample count is not presented as a detector improvement.
+- Conditional pixel F1 now averages all flagged forgeries, including zero-overlap
+  detections. Earlier conditional figures excluded zeros and were slightly optimistic.
+  Historical tables are retained with that definition; corrected figures are recomputed
+  from saved per-image CSV rather than by rerunning held-out data.
+- COVERAGE's split option now explicitly separates odd development IDs from even
+  validation IDs instead of silently ignoring it; prior aggregate exposure is still
+  disclosed. Unsupported split/dataset combinations are rejected.
+- Failed video key-frame analysis remains visible as error evidence and contributes to
+  the failure count, while successful frames retain their measured findings.
+- Audio and video robustness commands fail when required FFmpeg prerequisites are
+  missing instead of presenting an unrun benchmark as successful.
+- Earlier-JPEG trace analysis requires a known lossless PNG, BMP, TIFF or WEBP encoding;
+  lossy WEBP, JPEG-compressed TIFF and unknown encodings are not applicable.
+- Empty audio through the file or direct sample API returns not-applicable evidence and
+  "No content to analyse" at level 1, rather than a clean verdict or an empty-array error.
 - Short generator markers (`SDXL`, `Sora`, ...) found by chance inside compressed image
   data were reported as AI-generator metadata; they now count only when surrounded by text.
 
@@ -72,6 +90,12 @@ Nothing has been published yet. This section is derived from the commit history
 
 ### Changed (during development, before any release)
 
+- Unsigned generator metadata is a strong, unverified lead, capped at level 3 with the
+  wording "Metadata declares AI generation (unverified)" when it drives the AI verdict.
+  The Arabic report uses «البيانات الوصفية تصرّح بأنه مولّد بالذكاء الاصطناعي (غير متحقق منه)».
+  Level 4 is reserved for cryptographically verified provenance. No verifier is implemented,
+  and the current engines cannot produce that level; `decisive` remains a compatibility
+  field rather than a way to bypass fusion.
 - Detectors were reworked after the first run on public data flagged 23 of 183 Columbia
   originals and more than half of the CoMoFoD originals at JPEG quality 90: copy-move now
   requires the fine detail of both areas to correlate, the CFA test became a Bayer
@@ -105,6 +129,11 @@ Nothing has been published yet. This section is derived from the commit history
 
 ### Security
 
+- Each local server admits one upload/analysis at a time and rejects other valid uploads
+  with HTTP 503 before reading their bodies. This is an admission limit, not a hard
+  timeout, process sandbox or aggregate memory watchdog.
+- The POSIX decoder-cleanup test skips explicitly when process observation is unavailable,
+  instead of treating a failed `pgrep` as proof that no decoder remains.
 - Decoders are restricted to local files; playlist and reference formats are refused.
 - The local web UI checks the `Host` header and requires a per-session token to upload.
 - Pixel and byte limits are enforced before an image is decoded; MP4 box sizes are bounded.
@@ -115,7 +144,7 @@ Nothing has been published yet. This section is derived from the commit history
   Ghostscript), audio shape and size are checked before allocation, FFmpeg runs with
   protocol and format allow-lists and an allocation cap, decoder messages no longer
   contain paths, a linear XMP scan replaces a backtracking regular expression, and an
-  image or audio stream with nothing decodable is refused instead of reported clean.
+  image or audio stream that cannot be decoded is not reported clean.
 - A video whose declared sound track cannot be decoded is reported as partly failed.
 - `basira scan` refuses a `--csv` path that is one of its inputs, and a timed-out or
   crashed worker is killed together with any decoder it started (POSIX).

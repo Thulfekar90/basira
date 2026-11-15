@@ -134,8 +134,10 @@ is never written to a pipe or a log file.
 | 130 | interrupted with Ctrl+C |
 
 Verdict levels: 0 *No significant traces found*, 1 *Inconclusive*, 2 *Suspicious*,
-3 *Likely manipulated / AI-generated*, 4 decisive provenance evidence (for example a
-generator's own metadata).
+3 *Likely manipulated / AI-generated* or *Metadata declares AI generation (unverified)*.
+Level 4 is reserved for cryptographically verified provenance; verification is not
+implemented and the current engines cannot produce it. An unsigned generator tag is a
+strong lead, not proof. Empty decoded audio has the level-1 verdict *No content to analyse*.
 
 ```bash
 # Fail the job if anything in uploads/ is "Suspicious" or worse; print errors only.
@@ -212,12 +214,21 @@ and counted in `r.info["detectors_failed"]`.
 - **Scores**: every detector's `score` is scaled so that 0.5 is its own decision
   threshold. `confidence` says how much that detector can be trusted on this particular
   file (error-level analysis on a PNG gets almost none). Only the part of a score above
-  0.5 counts, weighted by confidence.
+  0.5 counts, weighted by confidence. These scores are not calibrated probabilities that
+  a file was manipulated or generated.
+- **"Metadata declares AI generation (unverified)"** means a strong unsigned tag was
+  found. The Arabic report says «البيانات الوصفية تصرّح بأنه مولّد بالذكاء الاصطناعي
+  (غير متحقق منه)». Anyone can add metadata; matching a generator's format or detecting
+  a C2PA/IPTC marker does not verify its origin. This finding cannot produce level 4.
 - **"No significant traces found" is not "authentic".** Basira never says a file is
   genuine: re-compression, resizing and careful editing erase the traces it relies on.
 - **"Inconclusive (part of the analysis failed)"** means a detector crashed or the content
   could not be decoded, so the absence of findings means little. The failed detectors are
-  listed.
+  listed, including errors from individual video key frames. Successful frames do not
+  hide those failures.
+- **"No content to analyse"** means the decoded audio contains no samples; the Arabic
+  report says «لا يوجد محتوى قابل للتحليل». It is neither a clean finding nor a claim
+  about an ordinary nonempty recording of silence.
 - The HTML report shows the localisation map over the image, each detector's own picture,
   its raw measurements and thresholds, and a timeline for audio and video. It is one
   self-contained file and loads nothing from the network.
@@ -247,9 +258,9 @@ both outputs (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 
 **Why does it say nothing about my AI-generated image?**
 Because that is the weakest question Basira answers, and the README says so. Without a
-trained model it recognises AI generation reliably only through provenance: generator
-metadata, C2PA Content Credentials and IPTC `trainedAlgorithmicMedia` labels — decisive
-when present, and trivially stripped. The pixel-level generator fingerprint works on
+trained model it mainly reports declarations in generator metadata, C2PA markers and
+IPTC `trainedAlgorithmicMedia` labels. These declarations can be added by anyone or
+stripped, and are not cryptographically verified. The pixel-level generator fingerprint works on
 lossless files that were not resized and is blind on JPEGs. A modern diffusion image
 re-saved by a social network will usually come back as *"No significant traces found"*.
 That result means "no traces", not "a camera took this".
@@ -271,6 +282,13 @@ Platform re-compression and resizing destroy most traces; only geometric evidenc
 **Does it upload my files or download a model?**
 No. There is no network code in the analysis path, no model download and no telemetry;
 decoders are restricted to local files. `basira serve` listens on 127.0.0.1 only.
+
+**What happens if several browser tabs upload at once?**
+Each local server admits one upload/analysis at a time. Other valid upload requests
+receive HTTP 503 before their request body is read; they are not queued for analysis.
+Retry after the current request finishes. This admission limit does not provide a hard
+analysis timeout, a separate worker process or an aggregate memory watchdog. For a
+per-file analysis timeout, use the CLI's `--timeout` option instead.
 
 **Which formats?**
 The test-suite exercises JPEG, PNG, TIFF, WebP and GIF images, WAV / FLAC / MP3 audio, and
