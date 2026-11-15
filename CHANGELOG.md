@@ -11,7 +11,18 @@ detector thresholds, scores and wording may change in any release; what a 0.x re
 Nothing has been published yet. This section is derived from the commit history
 (`git log`) and describes what the first release will contain.
 
+### Fixed
+
+- Short generator markers (`SDXL`, `Sora`, ...) found by chance inside compressed image
+  data were reported as AI-generator metadata; they now count only when surrounded by text.
+
 ### Added
+
+- **`image.jpeg_trace`**: maps pasted content in losslessly stored images through the
+  quantisation of the JPEG they once were. Tuned on the CASIA v2 development half; on the
+  held-out half TIFF splices found went from 9/334 to 63/334 with no added false alarm.
+  `public_datasets.py casia2 --half dev|test` reproduces the split. `AGENTS.md` sets the
+  rules for contributors and AI agents.
 
 - **"How the verdict was reached"** in the HTML report: a diagram of the analysis (file →
   each detector → category scores → verdict) drawn only from the report's own numbers. A
@@ -19,6 +30,11 @@ Nothing has been published yet. This section is derived from the commit history
   detectors are drawn as such. Static SVG with the same path written out as five steps, so
   it reads without JavaScript and in print; the script replays it (respecting reduced
   motion), and it is mirrored for the Arabic report.
+
+- **Out-of-sample image benchmark** on CASIA v1.0, CASIA v2.0 (corrected masks) and
+  COVERAGE, run once with thresholds frozen beforehand (`benchmarks/public_datasets.py
+  casia1|casia2|coverage`, optional per-image `--csv`). Results, including the 12% false
+  alarms on COVERAGE originals, are in the README.
 
 - **Three engines over one evidence model.** Every detector returns its raw statistic, its
   threshold, a plain-language sentence and, where it applies, a heat-map or time ranges;

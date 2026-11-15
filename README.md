@@ -105,11 +105,41 @@ CoMoFoD after JPEG re-compression of the whole image (the dataset's own `JC` var
 
 How to read this:
 
-- **False alarms are rare; misses are common.** That is the intended trade-off for a tool whose output may be used against someone, but it means a clean result proves little.
+- **Misses are common, and false alarms are rare except on repeated manufactured objects** (see the out-of-sample table: 12 of 100 COVERAGE originals). Few false alarms is the intended trade-off for a tool whose output may be used against someone, but it means a clean result proves little.
 - **Columbia** images are uncompressed, so the JPEG-history detector cannot apply. What fires is the colour-filter-array test, which only sees splices whose two sources had opposite Bayer phase — about half of them by construction.
 - **CoMoFoD**: the previous version flagged 12 originals, all from two scenes with identical *printed* objects (beer coasters, journal labels), because mass-printed copies share their fine detail just as a digital clone does. The rewritten copy-move detector makes every candidate clone pass several independent tests — keypoint geometry, fine-detail correlation, a 4-pixel "slide" test that separates a clone from a straight edge, a shared-sensor-noise test in flat areas (which printed duplicates fail), and a lattice test that rejects regular patterns such as windows and tiles — and small images are enlarged before keypoint search. Originals flagged went from 12 to 0 and forgeries found from 108 to 159; after JPEG re-compression from 55 to 14 and from 445 to 541. It is worse at the two lowest JPEG qualities (Q20: 13 → 6, Q30: 26 → 22) and on clones buried under noise added afterwards.
 - **The first run on these datasets was worse**: 23 of 183 Columbia originals were flagged, and at JPEG quality 90 more than half of the CoMoFoD originals were. Fixing that meant rebuilding the copy-move verification, replacing the CFA test, cutting the noise detector in half and adding a comb-purity check to the JPEG detector (see [docs/METHODS.md](docs/METHODS.md)).
-- **Caveat — these numbers are in-sample.** Several thresholds were tuned on these same two datasets; for the new copy-move tests some were tuned on odd-numbered files only, but the joint threshold, the slide test and the lattice test were set after looking at all of them. Expect worse numbers on data it has never seen, and run `benchmarks/evaluate_folder.py` on yours before trusting it.
+- **Caveat — these numbers are in-sample.** Several thresholds were tuned on these same two datasets; for the new copy-move tests some were tuned on odd-numbered files only, but the joint threshold, the slide test and the lattice test were set after looking at all of them. The next table is what happens on data it has never seen.
+
+### Out-of-sample: datasets never used for tuning
+
+Run once, thresholds frozen at commit `636c759` before the data was downloaded; nothing was changed after seeing these numbers.
+
+| Dataset | Originals flagged | Forgeries flagged | Pixel F1 when flagged | ROC-AUC |
+|---|---|---|---|---|
+| **CASIA v1.0** (800 originals, 921 forgeries, JPEG; masks by Pham et al.) | 8 / 800 (1.0%) | 361 / 921 (39%) — copy-move 273 / 459, splicing 88 / 462 | 0.50 | 0.71 |
+| **CASIA v2.0** (7,491 originals, 5,123 forgeries, JPEG/TIFF; corrected masks) | 120 / 7,491 (1.6%) | 1,876 / 5,123 (37%) — copy-move 1,632 / 3,295, splicing 244 / 1,828 | 0.56 | 0.68 |
+| **COVERAGE** (100 originals with similar-but-genuine objects, 100 copy-move forgeries, TIFF) | **12 / 100 (12%)** | 65 / 100 (65%) | 0.56 | 0.81 |
+
+- **Copy-move generalises; splicing in JPEG does not.** Half or more of the clones are found everywhere, but only 13–19% of the CASIA splices.
+- **COVERAGE is the real failure.** It was built to trap copy-move detectors: every original contains physically identical objects (the same product twice on a shelf). Basira flags 12 of them as clones. The shared-noise test that cleared CoMoFoD's printed coasters does not separate them here — on the false alarms its correlation is 0.55–0.87, on the detected forgeries 0.57–1.0 — so no threshold fixes this without giving up a large share of real detections. **A copy-move finding on an image with repeated manufactured objects needs a human look.**
+- **What fires on CASIA v2 originals (120):** an EXIF thumbnail that no longer matches the image, together with an edit date after the capture date (39 — these "originals" were cropped or resized in an editor in 2009, which is true but is not a forgery); the noise detector (29); copy-move, mostly on repetitive texture (27); the double-JPEG map (24); ELA (1).
+- **Bug found by this run, then fixed:** two CASIA v2 originals (the same photo twice) were also reported as *Stable Diffusion*, because the four bytes `SDXL` occurred by chance in their compressed image data. Short metadata markers now count only when surrounded by text. Both files stayed flagged for their thumbnail, so the table above does not change.
+
+### After that run: a splicing detector tuned on half, tested on the other half
+
+Splices in losslessly stored images were almost invisible (CASIA v2 TIFF splices: 2%). A new detector, `image.jpeg_trace`, looks for the quantisation steps of the JPEG the picture once was — still present in its pixels after it is stored as TIFF or PNG — and maps the blocks that do not sit on them (pasted content that was scaled, shifted off the 8×8 grid or came from another quality). It was tuned on the development half of CASIA v2 only (split by target photo, `public_datasets.py casia2 --half dev`) and then run once on the held-out half:
+
+| CASIA v2, held-out half | Before | After |
+|---|---|---|
+| Originals flagged | 61 / 3,708 (1.6%) | 61 / 3,708 (1.6%) |
+| Splices flagged, TIFF | 9 / 334 (2.7%) | **63 / 334 (18.9%)** |
+| Splices flagged, all | 94 / 825 (11.4%) | 148 / 825 (17.9%) |
+| Copy-move flagged, all | 747 / 1,510 (49.5%) | 788 / 1,510 (52.2%) |
+
+CASIA's originals are all JPEGs, where the new detector does not run (JPEG files are left to the double-quantisation map), so the false-alarm row above says little about it. Its clean-file evidence: the held-out originals decoded and stored losslessly score at most 0.14 against a threshold of 0.35; COVERAGE, Columbia and CoMoFoD originals (TIFF/PNG) and 600 macOS system images are unchanged at zero added alarms. It cannot see an edit that was JPEG-compressed again afterwards — which is what social networks do.
+
+Run `benchmarks/evaluate_folder.py` on your own material before trusting any of these numbers.
 
 ### Real content with forgeries made by this project
 
@@ -182,11 +212,11 @@ The thresholds were chosen on these same clips (no held-out set), and the source
 ## Limitations (read this)
 
 - **"Is this AI-generated?" is the weakest question here.** Without a trained model, Basira answers it reliably only through provenance: generator metadata, C2PA Content Credentials and IPTC `trainedAlgorithmicMedia` labels (decisive when present — and trivially stripped). The pixel-level generator fingerprint works on lossless files that were not resized; it is blind on JPEGs, because JPEG's 8×8 blocking occupies the same frequencies. The audio "TTS-like" cues also fire on noise-gated and phone audio and are weighted low on purpose. A modern diffusion image re-saved by a social network will usually come back as *"No significant traces found"*.
-- **Localising edits is the stronger part, and it is still modest.** On public data Basira flags most uncompressed copy-move forgeries (in-sample, see above), few after strong JPEG compression, and under a third of uncompressed splices. Each method has a precondition: the double-quantisation map needs a JPEG saved at least twice, directly, with the grid intact; the colour-filter test needs a near-lossless camera image; copy-move needs texture or an exactly copied smooth area, misses many clones after heavy JPEG compression or added noise, and can still be fooled by repeated printed objects in a JPEG.
+- **Localising edits is the stronger part, and it is still modest.** On public data Basira flags most uncompressed copy-move forgeries (in-sample, see above), few after strong JPEG compression, and under a third of uncompressed splices. Each method has a precondition: the double-quantisation map needs a JPEG saved at least twice, directly, with the grid intact; the colour-filter test needs a near-lossless camera image; copy-move needs texture or an exactly copied smooth area, misses many clones after heavy JPEG compression or added noise, and is fooled by repeated manufactured objects (12% of COVERAGE originals). Out-of-sample, about half the copy-move forgeries and 13–19% of JPEG splices are found; splices stored losslessly after a JPEG history are now found about one time in five.
 - **Resizing, screenshots and platform re-compression destroy most traces** — see the robustness table above. An image that went through WhatsApp, X or Instagram has usually lost the splice and in-painting evidence. That is physics, not a bug.
 - **Audio**: a cut is found only when the recording carries mains hum; an insertion only when its background noise differs and there are quiet pauses; a real change of room looks the same as a splice. Telephone-band audio hides almost everything. Re-recorded or resampled synthetic speech is invisible.
 - **Video**: footage from another source cut in with hard cuts, and speed changes, cannot be seen — a legitimate edit looks the same. Removal is found only inside one continuous shot. The double-compression and source-noise tests are informational (they cannot change the verdict on their own); neither has been validated on real footage.
-- **Two public image datasets, none for audio or video.** Audio and video were measured on simulated and derived material only (tables above). CASIA, IMD2020, NIST16, ASVspoof and FakeAVCeleb have not been run, and the thresholds were tuned on the two datasets that were. Use `benchmarks/evaluate_folder.py`; contributions with reproducible numbers are very welcome.
+- **Five public image datasets, none for audio or video.** Thresholds were tuned on Columbia and CoMoFoD; CASIA v1, CASIA v2 and COVERAGE are out-of-sample. Audio and video were measured on simulated and derived material only (tables above). IMD2020, NIST16, ASVspoof and FakeAVCeleb have not been run. Use `benchmarks/evaluate_folder.py`; contributions with reproducible numbers are very welcome.
 - A forensic tool gives leads for a human examiner. Do not use its output as the sole basis for an accusation.
 
 ## How it decides

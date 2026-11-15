@@ -11,6 +11,7 @@ from ..core.utils import thumbnail
 from .copymove import analyze_copymove
 from .ela import analyze_ela
 from .jpeg import analyze_double_quantization
+from .jpeg_trace import analyze_jpeg_trace
 from .load import ImageData, from_array, load_image
 from .metadata import analyze_metadata
 from .noise import analyze_noise
@@ -18,6 +19,7 @@ from .spectral import analyze_cfa, analyze_spectral
 
 PIXEL_DETECTORS = [
     ("image.jpeg_dq", "JPEG double-quantisation map", Category.MANIPULATION, analyze_double_quantization),
+    ("image.jpeg_trace", "Earlier-JPEG trace map", Category.MANIPULATION, analyze_jpeg_trace),
     ("image.ela", "Error level analysis", Category.MANIPULATION, analyze_ela),
     ("image.noise", "Sensor-noise consistency", Category.MANIPULATION, analyze_noise),
     ("image.cfa", "Camera demosaicing (CFA) consistency", Category.MANIPULATION, analyze_cfa),

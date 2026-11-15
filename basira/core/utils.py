@@ -346,13 +346,34 @@ def scan_signatures(data: bytes, kinds: Optional[Iterable[str]] = None) -> List[
             continue
         if anchors is not None and not any(a in data for a in anchors):
             continue
-        m = rx.search(data)
+        m = next((m for _, m in zip(range(64), rx.finditer(data)) if _in_text(data, m)), None)
         if m and label not in found:
             lo = max(0, m.start() - 24)
             ctx = data[lo: m.end() + 40]
             found[label] = {"label": label, "kind": kind, "offset": str(m.start()),
                             "context": _printable(ctx)}
     return list(found.values())
+
+
+# Short markers ("SDXL", "Sora", "Lavf58") occur by chance inside compressed data: on CASIA
+# v2, "SDXL" turned up in the entropy-coded scan of a 2009 JPEG. Metadata is text, so a
+# short match only counts when at least SHORT_MATCH_CONTEXT more text bytes surround it.
+SHORT_MATCH = 12
+SHORT_MATCH_CONTEXT = 6
+_TEXT_BYTES = frozenset(range(32, 127)) | {0, 9, 10, 13}
+
+
+def _in_text(data: bytes, m: "re.Match") -> bool:
+    if m.end() - m.start() >= SHORT_MATCH:
+        return True
+    extra, i = 0, m.start() - 1
+    while i >= 0 and data[i] in _TEXT_BYTES and extra < SHORT_MATCH_CONTEXT:
+        extra, i = extra + 1, i - 1
+    i = m.end()
+    while i < len(data) and data[i] in _TEXT_BYTES and extra < SHORT_MATCH_CONTEXT:
+        extra, i = extra + 1, i + 1
+    # In a tiny buffer that is all text there may be fewer than SHORT_MATCH_CONTEXT bytes.
+    return extra >= min(SHORT_MATCH_CONTEXT, len(data) - (m.end() - m.start()))
 
 
 def _printable(b: bytes) -> str:

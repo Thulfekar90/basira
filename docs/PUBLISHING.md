@@ -31,9 +31,8 @@ The repository is ready to push but has never been published. Whoever publishes 
 - **Hero image.** The README's first image is a synthetic test scene. A real photograph the
   owner has the rights to (their own, or CC0), edited by hand and analysed with
   `basira scan`, makes a far stronger first impression. Add a screenshot of the HTML report.
-- **More public-dataset numbers.** Columbia and CoMoFoD are in the README. Running
-  `benchmarks/evaluate_folder.py` on data the thresholds were *not* tuned on (CASIA v2,
-  IMD2020 for images; ASVspoof for audio) and publishing the result, good or bad, is the
-  most convincing thing still missing.
+- **More public-dataset numbers.** Columbia and CoMoFoD (in-sample) and CASIA v1, CASIA v2
+  and COVERAGE (out-of-sample) are in the README. Still missing: IMD2020 (real-world
+  edits) for images, and any real data at all for audio (ASVspoof) and video.
 - **Name.** Check that `basira` is free on PyPI before promising `pip install basira`.
 - **PyPI release** once the above is done: `python -m build && twine upload dist/*`.

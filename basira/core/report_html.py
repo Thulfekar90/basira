@@ -60,7 +60,7 @@ MAX_LAYERS = 10             # CSS below defines switches for this many map layer
 # colour in every report; detectors not listed take the next free slot.
 LAYER_COLORS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#6250d6",
                 "#e34948", "#008300")
-LAYER_SLOT = {"image.jpeg_dq": 0, "image.copymove": 1, "video.frame_copymove": 1,
+LAYER_SLOT = {"image.jpeg_dq": 0, "image.jpeg_trace": 0, "image.copymove": 1, "video.frame_copymove": 1,
               "image.noise": 2, "image.cfa": 3, "image.ela": 4, "image.thumbnail": 5}
 
 # --------------------------------------------------------------------------- #
@@ -452,6 +452,18 @@ DETECTORS: Dict[str, Dict[str, Tuple[str, ...]]] = {
                "ويحدّد المربعات التي لا تحمل هذا الأثر.",
                "يتطلب صورة JPEG حُفظت مرتين على الأقل مع بقاء شبكة 8×8 سليمة؛ وأي حفظ إضافي "
                "بضغط أو تغيير للحجم يمحو الأثر.")},
+    "image.jpeg_trace": {
+        "en": ("Finds the quantisation steps of an earlier JPEG save that are still present in "
+               "the pixels, and maps the blocks whose DCT coefficients do not sit on them.",
+               "Runs on losslessly stored images (TIFF, PNG, BMP) that were a JPEG once and were "
+               "not resized or filtered since; it cannot see content pasted from a JPEG of the "
+               "same quality on the same 8×8 grid."),
+        "ar": ("خريطة أثر حفظ JPEG سابق",
+               "يستخرج خطوات التكميم التي تركها حفظ سابق بصيغة JPEG وما زالت في البكسلات، "
+               "ويحدّد المربعات التي لا تقع معاملات DCT فيها على تلك الخطوات.",
+               "يعمل على الصور المحفوظة بلا ضغط (TIFF وPNG وBMP) التي كانت JPEG يوماً ولم يُغيَّر "
+               "حجمها أو تُرشَّح بعد ذلك، ولا يرى محتوى مُلصقاً من JPEG بالجودة نفسها وعلى شبكة "
+               "8×8 نفسها.")},
     "image.copymove": {
         "en": ("Matches keypoints inside the image and accepts a clone only if the fine detail "
                "of the two areas (the noise residual) also matches.",

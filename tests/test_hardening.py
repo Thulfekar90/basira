@@ -328,7 +328,7 @@ def test_signature_prefilter_finds_exactly_what_the_plain_regexes_find():
     import random
     import re
 
-    from basira.core.utils import SIGNATURES, _anchors, scan_signatures
+    from basira.core.utils import SIGNATURES, _anchors, _in_text, scan_signatures
 
     assert all(_anchors(p) for p, _, _ in SIGNATURES), "every pattern should get a prefilter"
     samples = [b"Kling AI", b"KlingAI", b"DALL\xb7E 3", b"DALL-E", b"Grok 2", b"Grok-Imagine",
@@ -345,9 +345,24 @@ def test_signature_prefilter_finds_exactly_what_the_plain_regexes_find():
             at = rng.randrange(len(data))
             data[at:at] = s
         data = bytes(data)
-        plain = {label for p, label, _ in SIGNATURES if re.search(p, data)}
+        plain = {label for p, label, _ in SIGNATURES
+                 if any(_in_text(data, m) for m in re.finditer(p, data))}
         fast = {f["label"] for f in scan_signatures(data)}
         assert fast == plain, (trial, picks)
+
+
+def test_short_generator_markers_inside_compressed_data_are_not_metadata():
+    """CASIA v2 Au_ani_10163.jpg (2009) was reported as Stable Diffusion because the bytes
+    'SDXL' occur in its entropy-coded scan. Short markers must be surrounded by text."""
+    from basira.core.utils import scan_signatures
+
+    binary = b"\x9e\xf6\n\xb1 \x1b\xd8\x92;\xe3J\xea\xda\x96\x1b~\xba\xf1\x89SDXL)o\xa8\x88(A\xe1I\t"
+    assert not scan_signatures(binary * 3, kinds=["ai"])
+    for text in (b'<xmp:CreatorTool>SDXL 1.0</xmp:CreatorTool>',
+                 b"\x00\x01Make\x00Software: SDXL\x00\x02\x03",
+                 b"SDXL",
+                 b"\xff\xd8\xff\xfe\x00\x10Stable Diffusion\xff\xda"):
+        assert [f["label"] for f in scan_signatures(text, kinds=["ai"])] == ["Stable Diffusion"], text
 
 
 # ---- fourth review round (Codex, on the specialists' changes) --------------------------

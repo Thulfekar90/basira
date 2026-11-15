@@ -23,3 +23,6 @@ Thumbs.db
 .idea/
 .vscode/
 .claude/
+
+# local coordination between agents (handoff log, evidence, local paths)
+coordination/
