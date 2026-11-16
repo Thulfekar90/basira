@@ -806,6 +806,10 @@ def make_case(corpus: Dict[str, bytes], seed: int, index: int
 # ============================================================================== #
 # Oracle (runs inside the worker process)
 # ============================================================================== #
+def _dec(a) -> str:
+    return os.fsdecode(a) if isinstance(a, (bytes, os.PathLike)) else str(a)
+
+
 class _Audit:
     """Records process creation and socket activity through the interpreter audit hook."""
 
@@ -819,8 +823,12 @@ class _Audit:
             return
         if event == "subprocess.Popen":
             exe, argv = args[0], args[1]
-            self.events.append(("spawn", [str(exe)] + [os.fsdecode(a) if isinstance(a, bytes)
-                                                       else str(a) for a in (argv or [])]))
+            self.events.append(("spawn", [str(exe)] + [_dec(a) for a in (argv or [])]))
+        elif event == "os.posix_spawn" and self.events and self.events[-1][0] == "spawn" \
+                and self.events[-1][1][1:] == [_dec(a) for a in (args[1] or [])]:
+            # Python 3.13+ on Linux starts subprocess.Popen children through posix_spawn:
+            # the same child as the Popen event just recorded (and checked), not a second one.
+            pass
         elif event in ("os.system", "os.exec", "os.posix_spawn", "os.spawn", "os.fork",
                        "os.forkpty", "pty.spawn"):
             self.events.append(("spawn", [event, repr(args)[:200]]))
