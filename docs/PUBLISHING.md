@@ -1,8 +1,9 @@
 # Publishing checklist
 
 Published on 2026-11-16 at <https://github.com/Thulfekar90/basira> (public), with the
-description and topics below. The first CI run failed on Linux and Windows; the fixes are
-listed under "First CI run". Nothing has been released on PyPI.
+description and topics below. The first CI runs failed on Linux and Windows; after the fixes
+listed under "First CI run", run #4 (commit `24ea873`) passed all 11 jobs, Windows included.
+Nothing has been released on PyPI.
 
 - Description: "Explainable forensics for edited and AI-generated images, audio and video:
   shows where a file was changed and why."
@@ -23,7 +24,7 @@ listed under "First CI run". Nothing has been released on PyPI.
 ## First CI run (2026-11-16)
 
 Run #1 failed on every Linux and Windows job, although the suite had passed on macOS and in
-a Linux Docker image. Fixes, made in the following commit:
+a Linux Docker image. Fixes:
 
 - `benchmarks/video_robustness.py` read decoded video with a single `read(size * n)` and
   `n = 10**6`, which asks for hundreds of GB up front and raises `MemoryError` on Linux and
@@ -33,6 +34,12 @@ a Linux Docker image. Fixes, made in the following commit:
 - Windows only: `tests/test_readme_tables.py` read the Arabic README in the system code page
   (now UTF-8), and `tests/test_report.py` used `<`, `>` and `"` in file names, which Windows
   refuses (it now uses the characters Windows allows).
+- Python 3.13 on Linux starts `subprocess.Popen` children through `os.posix_spawn`, and the
+  fuzz harness's audit counted that as a second, unchecked process. A `posix_spawn` that
+  repeats the command line of the `Popen` just checked is now skipped; any other is still a
+  failure.
+- The Windows jobs passed in run #3 and #4; they are still marked experimental in
+  `.github/workflows/ci.yml` until the owner decides to make them required.
 
 ## Before announcing it (owner's decisions)
 
