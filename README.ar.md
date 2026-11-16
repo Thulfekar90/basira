@@ -7,7 +7,10 @@
 
 [English](README.md) · [كيف يعمل كل كاشف](docs/METHODS.md)
 
-![صورة مركَّبة، ثم المنطقة المعدَّلة الحقيقية، ثم خريطة بصيرة](docs/img/demo_splice.jpg)
+![صورة حقيقية، ثم الصورة نفسها بعد نسخ زهور إلى الممشى، ثم خريطة بصيرة تحدد المنطقة المنسوخة والملصقة معاً](docs/img/hero_real.jpg)
+
+<sub>صورة حقيقية من هاتف (قُصّت حتى لا يظهر فيها أي شخص)، عُدّلت بنسخ ولصق بسيط وحُفظت JPEG.
+جرّبها بنفسك: `basira scan docs/img/walkway_edited.jpg` و`basira scan docs/img/walkway_original.jpg`.</sub>
 
 ## ما هي
 
@@ -29,7 +32,7 @@
 ## التثبيت والاستخدام
 
 ```bash
-pip install git+https://github.com/OWNER/basira.git
+pip install git+https://github.com/Thulfekar90/basira.git
 ```
 
 ```bash

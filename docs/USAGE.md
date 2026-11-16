@@ -171,7 +171,7 @@ environment variable turns it off.
 **GitHub Actions** (not run by this project's CI; adapt the paths):
 
 ```yaml
-- run: pip install git+https://github.com/OWNER/basira.git
+- run: pip install git+https://github.com/Thulfekar90/basira.git
 - run: basira scan assets/ --recursive --no-html --quiet --fail-on 2 --csv basira.csv
 - uses: actions/upload-artifact@v4
   if: always()

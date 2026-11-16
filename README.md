@@ -9,7 +9,11 @@ It shows *where* a file was changed and *why* it thinks so — and says so plain
 
 </div>
 
-![A spliced image, the true edited area, and Basira's localisation map](docs/img/demo_splice.jpg)
+![A real photo, the same photo with flowers copied onto the walkway, and Basira's map marking both the copied and the pasted area](docs/img/hero_real.jpg)
+
+<sub>A real phone photo (cropped so no person is visible), edited with a simple copy-move and
+saved as JPEG. Try it yourself: `basira scan docs/img/walkway_edited.jpg` and
+`basira scan docs/img/walkway_original.jpg`.</sub>
 
 ```console
 $ basira scan splice_2.jpg
@@ -24,8 +28,8 @@ splice_2.jpg  [image]
   report: splice_2.jpg.basira.html
 ```
 
-(The image above and this output come from `python examples/make_demo.py`, which generates
-forgeries with known ground truth.)
+(This output comes from `python examples/make_demo.py`, which generates forgeries with known
+ground truth; see [the splice figure](docs/img/demo_splice.jpg).)
 
 ## What it is
 
@@ -47,7 +51,7 @@ Design choices that differ from most detectors:
 ## Install
 
 ```bash
-pip install git+https://github.com/OWNER/basira.git
+pip install git+https://github.com/Thulfekar90/basira.git
 ```
 
 Python 3.9+. Dependencies: NumPy, SciPy, Pillow, OpenCV (headless), soundfile, imageio-ffmpeg (bundles an FFmpeg binary, so nothing else needs installing).
@@ -272,7 +276,7 @@ Each detector returns `score` (0.5 = its threshold) and `confidence` (how applic
 ## Develop
 
 ```bash
-git clone https://github.com/OWNER/basira.git && cd basira
+git clone https://github.com/Thulfekar90/basira.git && cd basira
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m pytest -q                   # the test suite
 .venv/bin/python benchmarks/synthetic_images.py # synthetic image numbers

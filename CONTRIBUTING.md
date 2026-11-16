@@ -12,7 +12,7 @@ contribution. An improvement that is asserted but not measured is not.
 ## Set up
 
 ```bash
-git clone https://github.com/OWNER/basira.git && cd basira
+git clone https://github.com/Thulfekar90/basira.git && cd basira
 python -m venv .venv
 .venv/bin/pip install -e ".[dev]"        # Windows: .venv\Scripts\pip
 .venv/bin/basira doctor                  # versions, ffmpeg, and a self-test

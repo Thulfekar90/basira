@@ -76,8 +76,7 @@ def test_metadata_matches_what_is_supported_and_documented():
 
 
 def test_project_urls_point_at_the_same_repository_as_the_readme():
-    """README.md uses github.com/OWNER/basira until the project is published
-    (docs/PUBLISHING.md); whoever replaces OWNER must replace it here too."""
+    """Every link to the repository names the same owner as README.md."""
     owners = set(re.findall(r"github\.com/([^/\s]+)/basira", _read("README.md")))
     assert len(owners) == 1, owners
     owner = owners.pop()

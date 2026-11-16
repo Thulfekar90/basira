@@ -153,4 +153,4 @@ Nothing has been published yet. This section is derived from the commit history
   the page's language.
 - [SECURITY.md](SECURITY.md) documents the threat model, the limits and what is not covered.
 
-[0.1.0]: https://github.com/OWNER/basira
+[0.1.0]: https://github.com/Thulfekar90/basira

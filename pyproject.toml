@@ -52,12 +52,11 @@ dev = [
 ]
 
 [project.urls]
-# OWNER is a placeholder, exactly as in README.md: docs/PUBLISHING.md says when to replace it.
-Homepage = "https://github.com/OWNER/basira"
-Documentation = "https://github.com/OWNER/basira/blob/main/docs/USAGE.md"
-Repository = "https://github.com/OWNER/basira"
-Issues = "https://github.com/OWNER/basira/issues"
-Changelog = "https://github.com/OWNER/basira/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Thulfekar90/basira"
+Documentation = "https://github.com/Thulfekar90/basira/blob/main/docs/USAGE.md"
+Repository = "https://github.com/Thulfekar90/basira"
+Issues = "https://github.com/Thulfekar90/basira/issues"
+Changelog = "https://github.com/Thulfekar90/basira/blob/main/CHANGELOG.md"
 
 [project.scripts]
 basira = "basira.cli:main"
