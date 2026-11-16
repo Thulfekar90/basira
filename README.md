@@ -9,11 +9,14 @@ It shows *where* a file was changed and *why* it thinks so — and says so plain
 
 </div>
 
-![A real photo, the same photo with flowers copied onto the walkway, and Basira's map marking both the copied and the pasted area](docs/img/hero_real.jpg)
+![A real photo, the same photo with a group of trees cloned into the fog, and Basira's map marking both the copied and the pasted area](docs/img/hero_snow.jpg)
 
-<sub>A real phone photo (cropped so no person is visible), edited with a simple copy-move and
-saved as JPEG. Try it yourself: `basira scan docs/img/walkway_edited.jpg` and
-`basira scan docs/img/walkway_original.jpg`.</sub>
+<sub>A real phone photo, edited by cloning a group of trees into the fog with soft edges and
+saved again as JPEG. Two independent tests point to the same place: the cloned detail matches
+another part of the picture, and the pasted area has lost the photo's earlier JPEG history. The
+clone is still found after the edited photo is resized and saved at quality 80. A splice from
+*another* photo is found far less often — see [Measured results](#measured-results). Try it:
+`basira scan docs/img/snow_edited.jpg` and `basira scan docs/img/snow_original.jpg`.</sub>
 
 ```console
 $ basira scan splice_2.jpg
