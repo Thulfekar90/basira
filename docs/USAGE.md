@@ -319,8 +319,8 @@ basira --version
 `basira scan --help` describes each option. Options may be mixed with the paths
 (`basira scan a.jpg --no-html b.jpg`). `python -m basira` is the same command.
 
-**Docker.** The repository contains a `Dockerfile` (it has not been built or run by the
-project yet — treat it as a starting point):
+**Docker.** The repository contains a `Dockerfile` (built and run with the commands below on
+Apple-silicon Linux/arm64; not yet tried on amd64):
 
 ```bash
 docker build -t basira .

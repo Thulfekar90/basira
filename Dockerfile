@@ -2,8 +2,9 @@
 #   docker build -t basira .
 #   docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD:/data" basira scan photo.jpg
 #
-# UNTESTED: this file was written without a Docker daemon at hand and has not been built
-# or run by the project. It is kept deliberately simple; please report what breaks.
+# Verified on 2026-11-16: built with Docker 29.8 (linux/arm64, Apple silicon); `basira doctor`
+# passes at build time and the `scan` command above ran with --network none. Not yet built
+# on linux/amd64; please report what breaks.
 #
 # - Build needs the network once (pip downloads the dependencies).
 # - Running needs none: start it with `--network none`. Basira has no network code in its
