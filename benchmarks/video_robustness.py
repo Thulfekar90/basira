@@ -99,7 +99,15 @@ def _frames_from_pipe(cmd: List[str], w: int, h: int, n: int) -> np.ndarray:
     """Read up to n raw I420 frames from an ffmpeg command writing to stdout."""
     size = w * h * 3 // 2
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    buf = p.stdout.read(size * n)
+    # Read frame by frame: a single read(size * n) asks for size * n bytes up front, which
+    # is hundreds of GB for the default n and raises MemoryError on Linux.
+    chunks: List[bytes] = []
+    for _ in range(n):
+        frame = p.stdout.read(size)
+        if len(frame) < size:
+            break
+        chunks.append(frame)
+    buf = b"".join(chunks)
     p.stdout.close()
     p.kill()
     p.wait()

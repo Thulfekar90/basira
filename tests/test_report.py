@@ -411,7 +411,9 @@ def test_hostile_strings_are_inert_in_every_context(lang):
 
 
 def test_hostile_file_name_and_metadata_from_a_real_file(out):
-    name = '"><img src=x onerror=alert(1)>.jpg'
+    # Windows refuses < > " in file names; there the names keep the characters it allows.
+    posix = os.name != "nt"
+    name = '"><img src=x onerror=alert(1)>.jpg' if posix else "'&amp;x onerror=alert(1).jpg"
     exif = Image.Exif()
     exif[0x0131] = "</script><script>alert(2)</script>"          # Software
     exif[0x010F] = '"onmouseover="alert(3)'                      # Make
@@ -424,7 +426,8 @@ def test_hostile_file_name_and_metadata_from_a_real_file(out):
     meta.add_text("parameters", "</script><script>alert(4)</script>\nNegative prompt: "
                   "<img src=x onerror=alert(5)>\nSteps: 30, Sampler: Euler a, CFG scale: 7, "
                   'Seed: 1, Size: 512x512, Model: "><svg onload=alert(6)>')
-    png = os.path.join(out, "'><svg onload=alert(7)><script>.png")
+    png = os.path.join(out, "'><svg onload=alert(7)><script>.png" if posix
+                       else "'&lt;svg onload=alert(7)&gt;.png")
     Image.fromarray(S.camera_photo(2, 240, 320)).save(png, pnginfo=meta)
     r2 = basira.analyze(png)
     assert r2.verdict_level == 3 and "alert(4)" in json.dumps(r2.to_dict())

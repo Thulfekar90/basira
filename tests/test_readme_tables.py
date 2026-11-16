@@ -22,7 +22,7 @@ def _numbers(rows, columns=None):
 
 def test_shared_image_measurement_tables_match():
     root = Path(__file__).resolve().parents[1]
-    en, ar = [list(_tables((root / name).read_text()))
+    en, ar = [list(_tables((root / name).read_text(encoding="utf-8")))
               for name in ("README.md", "README.ar.md")]
     # Match stable corpus/row markers; translated result columns remain numeric.
     for en_marker, ar_marker in [
